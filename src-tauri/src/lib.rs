@@ -1,4 +1,5 @@
 pub mod dpapi;
+pub mod fps;
 pub mod join;
 pub mod store;
 
