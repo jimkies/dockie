@@ -37,7 +37,7 @@ function renderBars() {
 }
 let stale = false;
 // Re-rendering would wipe an in-progress edit, so wait until focus leaves rows/settings.
-const editing = () => document.activeElement?.matches("#rows input:not([type=checkbox]), #tab-settings input:not([type=checkbox]), details.menu *");
+const editing = () => document.activeElement?.matches("#rows input:not([type=checkbox]), #tab-settings input:not([type=checkbox])");
 async function refresh() {
   snap = await invoke("get_snapshot");
   if (editing()) { stale = true; return; }
@@ -112,7 +112,10 @@ function renderRow(a) {
   summary.setAttribute("aria-label", "More actions for " + a.username);
   const menu = el("details", { className: "menu" }, summary);
   const remove = el("button", { textContent: "Remove" });
-  remove.addEventListener("click", () => confirm(`Remove ${a.username}?`) && call("remove_account", { userId: id }).then(() => refresh().catch(fail)));
+  remove.addEventListener("click", () => {
+    menu.open = false;
+    if (confirm(`Remove ${a.username}?`)) call("remove_account", { userId: id }).then(() => refresh().catch(fail));
+  });
   const copy = el("button", { textContent: "Copy username" });
   copy.addEventListener("click", () => { navigator.clipboard.writeText(a.username).catch(fail); menu.open = false; });
   menu.append(el("div", { className: "pop" }, copy, remove));
