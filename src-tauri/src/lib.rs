@@ -1,6 +1,7 @@
 pub mod dpapi;
 pub mod fps;
 pub mod join;
+pub mod preview;
 pub mod procs;
 pub mod roblox_api;
 pub mod store;
