@@ -12,7 +12,7 @@ pub enum ApiError {
 impl std::fmt::Display for ApiError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      ApiError::NeedsSignIn => write!(f, "Sign-in expired"),
+      ApiError::NeedsSignIn => write!(f, "Needs sign-in"),
       ApiError::Other(m) => write!(f, "{m}"),
     }
   }

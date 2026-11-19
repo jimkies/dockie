@@ -60,7 +60,7 @@ impl AppCtx {
 
   pub fn cookie(&self, user_id: u64) -> Result<String, String> {
     let enc = self.accounts.lock().unwrap().iter().find(|a| a.user_id == user_id).map(|a| a.cookie_dpapi.clone()).ok_or("Account not found")?;
-    dpapi::unprotect(&enc).map_err(|_| "Sign-in expired".to_string())
+    dpapi::unprotect(&enc).map_err(|_| ApiError::NeedsSignIn.to_string())
   }
 
   pub fn snapshot(&self) -> Snapshot {
@@ -129,6 +129,8 @@ pub struct AddResult {
 
 pub fn apply_check(acc: &mut Account, r: Result<UserInfo, ApiError>) {
   match r {
+    // the cookie belongs to someone else (e.g. a hand-edited import file)
+    Ok(u) if u.id != acc.user_id => acc.status = AccountStatus::NeedsSignIn,
     Ok(u) => {
       acc.username = u.name;
       acc.display_name = u.display_name;
@@ -228,5 +230,12 @@ mod tests {
     assert_eq!(a.status, AccountStatus::NeedsSignIn);
     apply_check(&mut a, Ok(UserInfo { id: 1, name: "new".into(), display_name: "New".into() }));
     assert_eq!((a.status, a.username.as_str(), a.display_name.as_str()), (AccountStatus::Ok, "new", "New"));
+  }
+
+  #[test]
+  fn check_rejects_other_users_cookie() {
+    let mut a = acc();
+    apply_check(&mut a, Ok(UserInfo { id: 2, name: "other".into(), display_name: "Other".into() }));
+    assert_eq!((a.status, a.username.as_str()), (AccountStatus::NeedsSignIn, "old"));
   }
 }
