@@ -57,6 +57,12 @@ impl Launcher {
         if !exists {
           continue;
         }
+        // queued twice, or already running: focus instead of launching again
+        if running_ids(&ctx).contains(&job.user_id) {
+          let _ = focus_account(&ctx, job.user_id);
+          emit(&app, job.user_id, "running", None);
+          continue;
+        }
         ctx.launching.store(true, Ordering::SeqCst);
         emit(&app, job.user_id, "launching", None);
         match run(&app, &job).await {
@@ -131,14 +137,24 @@ async fn run(app: &AppHandle, job: &Job) -> Result<(), String> {
 
   let default_cap = ctx.settings.lock().unwrap().fps_cap_default;
   let cap = acc_cap.or(default_cap);
+  let mut capped = false;
   if let Some(cap) = cap {
-    let file_cap = std::fs::read_to_string(fps::settings_path()).ok().and_then(|x| fps::read_cap(&x));
-    fps::before_launch(&mut ctx.state.lock().unwrap(), file_cap);
-    let _ = ctx.save_state();
-    let _ = fps::apply(cap); // Ok(false) just means no file to edit
+    // while a Dockie window is open the file may hold its cap, so trust the stored user value
+    let user_cap = if running_ids(&ctx).is_empty() {
+      std::fs::read_to_string(fps::settings_path()).ok().and_then(|x| fps::read_cap(&x))
+    } else {
+      ctx.state.lock().unwrap().user_fps_cap
+    };
+    // no user value to put back means we must not write a cap
+    if user_cap.is_some() {
+      fps::before_launch(&mut ctx.state.lock().unwrap(), user_cap);
+      let _ = ctx.save_state();
+      let _ = fps::apply(cap); // Ok(false) just means no file to edit
+      capped = true; // restore even if the write failed midway
+    }
   }
   let r = spawn_and_wait(&ctx, job.user_id, &username, &exe, &uri).await;
-  if cap.is_some() {
+  if capped {
     restore_fps(&ctx);
   }
   r
@@ -146,15 +162,26 @@ async fn run(app: &AppHandle, job: &Job) -> Result<(), String> {
 
 async fn spawn_and_wait(ctx: &AppCtx, user_id: u64, username: &str, exe: &std::path::Path, uri: &str) -> Result<(), String> {
   let pid = procs::spawn(exe, uri).map_err(|e| e.to_string())?;
+  // tracked from the start so Stop / Stop all reach it; on timeout it stays tracked (may be a self-update)
+  let created = |all: &[procs::ProcInfo], pid| all.iter().find(|p| p.pid == pid).map_or(0, |p| p.created);
+  ctx.state.lock().unwrap().launched.push(LaunchedProc { pid, started_at: created(&roblox_processes(), pid), user_id });
+  let _ = ctx.save_state();
   for _ in 0..120 {
     tokio::time::sleep(Duration::from_millis(500)).await;
     let all = roblox_processes();
-    if let Some((owner, hwnd)) = main_window(&descendants_or_self(pid, &all)) {
-      let started_at = all.iter().find(|p| p.pid == owner).map_or(0, |p| p.created);
-      ctx.state.lock().unwrap().launched.push(LaunchedProc { pid: owner, started_at, user_id });
+    let tree = descendants_or_self(pid, &all);
+    if let Some((owner, hwnd)) = main_window(&tree) {
+      {
+        let mut st = ctx.state.lock().unwrap();
+        st.launched.retain(|l| !(l.pid == pid && l.user_id == user_id));
+        st.launched.push(LaunchedProc { pid: owner, started_at: created(&all, owner), user_id });
+      }
       let _ = ctx.save_state();
       procs::set_title(hwnd, &format!("Roblox · {username}"));
       return Ok(());
+    }
+    if !all.iter().any(|p| tree.contains(&p.pid)) {
+      return Err("Roblox closed before its window appeared".into());
     }
   }
   Err("Window didn't appear within 60 s".into())
@@ -200,11 +227,18 @@ pub fn windows(ctx: &AppCtx) -> Vec<RobloxWindow> {
 }
 
 /// Kills every Roblox process, then takes the lock if we don't hold it. Returns lock_ok.
-pub fn close_all(ctx: &AppCtx) -> bool {
+pub async fn close_all(ctx: &AppCtx) -> bool {
   for p in roblox_processes() {
     let _ = procs::kill(p.pid);
   }
-  ensure_lock(ctx).is_ok()
+  // killed processes take a moment to release the mutex
+  for _ in 0..12 {
+    if ensure_lock(ctx).is_ok() {
+      return true;
+    }
+    tokio::time::sleep(Duration::from_millis(250)).await;
+  }
+  false
 }
 
 #[cfg(test)]

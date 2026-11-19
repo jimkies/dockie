@@ -177,6 +177,6 @@ pub fn close_pid(pid: u32) -> Res<()> {
 }
 
 #[tauri::command]
-pub fn close_all_roblox(ctx: State<AppCtx>) -> bool {
-  launcher::close_all(&ctx)
+pub async fn close_all_roblox(app: AppHandle) -> bool {
+  launcher::close_all(&app.state::<AppCtx>()).await
 }
