@@ -6,7 +6,7 @@ Date: 2026-11-18 · Status: awaiting approval
 
 Dockie is a Windows app for keeping several Roblox accounts saved and opening many of them at once, each in its own Roblox window. It is for personal use and close friends, so a few accounts per person rather than hundreds.
 
-It is a working copy of ExoPanda Multi 1.1.7 (a Tauri app; its feature list was read out of its program file). The macro features, the license key and the bootstrapper are left out. A few things ExoPanda lacks are added: every join type, "Join selected into…", renamed windows, and import/export.
+It is a working copy of ExoPanda Multi 1.1.7 (a Tauri app; its feature list was read out of its program file). The macro features, the license key and the bootstrapper are left out. A few things ExoPanda lacks are added: every join type, "Join selected into…", renamed windows, import/export, and an option to free RAM from minimized windows.
 
 ## Goals
 
@@ -27,6 +27,7 @@ It is a working copy of ExoPanda Multi 1.1.7 (a Tauri app; its feature list was 
 13. **Roblox already running when Dockie opens:** a warning bar with a **Close all Roblox** button.
 14. **Quitting:** quitting asks first if windows Dockie launched are still open. They stay open, but no further extra windows can open until Dockie is reopened.
 15. **Distribution:** one portable `dockie.exe`, with no installer and no auto-update.
+16. **Free RAM from minimized windows (setting, off by default):** Windows moves the idle memory of minimized Dockie windows out of RAM and into the page file on the SSD. Each window can drop from about 3 GB toward a few hundred MB. Opening the window again brings a short stutter while the memory loads back.
 
 ## Non-goals
 
@@ -90,7 +91,7 @@ Every file is written atomically: Dockie writes a temporary file, then renames i
 - **`accounts.json`:** `{version:1, accounts:[{user_id, username, display_name, avatar_url, added_at, note, join, fps_cap|null, cookie_dpapi, status}]}`.
   - `cookie_dpapi` is the cookie encrypted with Windows' per-user encryption (`CryptProtectData`), stored as base64.
   - If decryption fails (another PC or Windows user), the status becomes "Needs sign-in".
-- **`settings.json`:** `{fps_cap_default|null}`. `null` means Dockie never touches the FPS cap.
+- **`settings.json`:** `{fps_cap_default|null, trim_minimized:false}`. A `null` FPS default means Dockie never touches the FPS cap.
 - **`state.json`:**
   - `user_fps_cap`: your own FPS value, remembered before Dockie's first write.
   - `restore_pending`: true while the file holds a Dockie value.
@@ -158,6 +159,17 @@ The goal is that a Roblox started without Dockie always starts with your own val
 - **Capture method:** start with `PrintWindow(hwnd, PW_RENDERFULLCONTENT)`. Switch to Windows.Graphics.Capture if Roblox comes out black. ExoPanda uses WGC with PrintWindow as a fallback. **Builder's call.**
 - **Click a preview:** restore the window if it's minimized, then bring it to the front.
 
+### Freeing RAM from minimized windows (option)
+
+- **When it runs:** only with `trim_minimized` on, and only on Roblox windows Dockie launched or re-attached. Never on a visible window, so nothing stutters while you play.
+- **How:**
+  - The preview ticker already checks `IsIconic`. Once a window has been minimized for 10 s, Dockie calls `K32EmptyWorkingSet` on its process. The process handle is opened with `PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION`.
+  - It repeats every 5 minutes while the window stays minimized, because the running game pulls memory back in.
+  - Builder: measure the regrowth and SSD writes, then tune the interval.
+- **Turning the setting off** stops future trims. Memory that was already moved comes back on its own as the game uses it.
+- **If Windows or Roblox's anti-tamper refuses the handle,** Dockie shows "Roblox blocked freeing RAM" once and switches the setting off.
+- **SSD wear:** only memory the game changed since the last trim gets written. That's small next to a modern SSD's write endurance.
+
 ### Startup
 
 1. Take the multi-instance lock, or show the warning bar.
@@ -189,7 +201,7 @@ The goal is that a Roblox started without Dockie always starts with your own val
 │ │☐ (av) Sam   @SamMain   ⚠ Needs sign-in  [Sign in again]     │ │
 │ └────────────────────────────────────────────────────────────┘ │
 │ Tools: running Roblox windows (account / PID) [Focus][Close] … [Close all Roblox] │
-│ Settings: default FPS cap [—]  ·  open data folder  ·  version     │
+│ Settings: default FPS cap [—] · ☐ Free RAM from minimized windows · open data folder · version │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -211,18 +223,19 @@ Needs sign-in · Roblox isn't installed · Couldn't get a launch ticket (with Ro
 6. **Window titles:** Roblox may keep resetting the title. The ticker re-applies it, which may cause a visible flicker.
 7. **Imported accounts:** Roblox may sign out a session that is used from another PC or network.
 8. **Unofficial web addresses:** the ticket, share-link and PlaceLauncher addresses aren't public APIs. They can change or rate-limit (HTTP 429), and the startup check with many accounts is the most likely to hit a limit.
+9. **Freeing RAM:** check how much it saves, how fast memory grows back while the game keeps running, and whether Roblox's anti-tamper allows the call.
 
 **Known limits (accepted)**
 
-9. Closing Dockie stops *new* extra windows. Windows that are already open stay open.
-10. An in-game FPS change made in a normal Roblox while a Dockie window is open gets overwritten by the restore. Other in-game settings are shared across all windows.
-11. Export files contain plain-text cookies, which give full access to those accounts.
+10. Closing Dockie stops *new* extra windows. Windows that are already open stay open.
+11. An in-game FPS change made in a normal Roblox while a Dockie window is open gets overwritten by the restore. Other in-game settings are shared across all windows.
+12. Export files contain plain-text cookies, which give full access to those accounts.
 
 **Outside the code**
 
-12. Roblox doesn't support running several windows. An update may break it, and Roblox could act against it.
-13. The exe is unsigned, so friends will see Windows SmartScreen's "Windows protected your PC" warning. Some antivirus tools may flag it, because reading cookies and closing processes looks like what account stealers do. Code signing costs money.
-14. The end-to-end test needs the user to sign in to two real accounts.
+13. Roblox doesn't support running several windows. An update may break it, and Roblox could act against it.
+14. The exe is unsigned, so friends will see Windows SmartScreen's "Windows protected your PC" warning. Some antivirus tools may flag it, because reading cookies and closing processes looks like what account stealers do. Code signing costs money.
+15. The end-to-end test needs the user to sign in to two real accounts.
 
 ## Left to the builder
 
@@ -243,3 +256,4 @@ Needs sign-in · Roblox isn't installed · Couldn't get a launch ticket (with Ro
   5. A private server and a follow join both work.
   6. Export, then import on a clean data folder.
   7. With Roblox open before Dockie, the warning bar appears and Close all works.
+  8. With Free RAM on, a minimized window's RAM drops, the game stays connected, and it recovers when restored.
