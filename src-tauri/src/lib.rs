@@ -2,6 +2,7 @@ pub mod dpapi;
 pub mod fps;
 pub mod join;
 pub mod store;
+pub mod transfer;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
