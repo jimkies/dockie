@@ -1,1 +1,78 @@
-<h1>Dockie</h1>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dockie</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="warn" class="bar warn" hidden>
+  <span>Roblox is already running — extra windows can't open.</span>
+  <button id="warn-close">Close all Roblox</button>
+</div>
+<div id="loaderr" class="bar err" hidden></div>
+
+<header>
+  <nav role="tablist">
+    <button role="tab" data-tab="accounts" aria-selected="true">Accounts</button>
+    <button role="tab" data-tab="tools" aria-selected="false">Tools</button>
+    <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
+  </nav>
+  <div class="grow"></div>
+  <button id="signin">+ Sign in</button>
+  <button id="paste">Paste cookie</button>
+</header>
+
+<main>
+  <section id="tab-accounts">
+    <div class="toolbar">
+      <label>Join selected into: <input id="join-all" type="text" size="36" placeholder="paste link / id / @user"></label>
+      <button id="join-go">Go</button>
+    </div>
+    <div class="toolbar">
+      <button id="launch-sel">Launch selected</button>
+      <button id="stop-all">Stop all</button>
+      <div class="grow"></div>
+      <button id="import">Import</button>
+      <button id="export">Export</button>
+    </div>
+    <div id="rows"></div>
+    <p id="empty" class="muted" hidden>No accounts yet. Use Sign in or Paste cookie.</p>
+  </section>
+
+  <section id="tab-tools" hidden>
+    <div class="toolbar">
+      <h2>Running Roblox windows</h2>
+      <div class="grow"></div>
+      <button id="close-all">Close all Roblox</button>
+    </div>
+    <div id="windows"></div>
+  </section>
+
+  <section id="tab-settings" hidden>
+    <p><label>Default FPS cap <input id="set-fps" type="number" min="1" placeholder="none"></label></p>
+    <p><label><input id="set-trim" type="checkbox"> Free RAM from minimized windows</label></p>
+    <p><button id="open-data">Open data folder</button></p>
+    <p id="version" class="muted"></p>
+  </section>
+</main>
+
+<div id="toasts" aria-live="polite"></div>
+
+<dialog id="paste-dlg">
+  <form method="dialog">
+    <label>Paste a .ROBLOSECURITY cookie<br>
+      <textarea id="paste-text" rows="5" cols="52"></textarea>
+    </label>
+    <div class="toolbar">
+      <div class="grow"></div>
+      <button value="cancel">Cancel</button>
+      <button id="paste-ok" value="ok">Add</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
