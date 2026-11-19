@@ -38,11 +38,13 @@ pub fn after_launch(state: &mut State) -> Option<i32> {
 pub fn reconcile(state: &mut State, alive: &dyn Fn(&LaunchedProc) -> bool, launching: bool) -> Option<i32> {
   let before = state.launched.len();
   state.launched.retain(alive);
-  if before != state.launched.len() || (state.restore_pending && !launching) {
+  let due = before != state.launched.len() || (state.restore_pending && !launching);
+  if due {
     state.restore_pending = false;
-    return state.user_fps_cap;
   }
-  None
+  // with no Dockie window left the file is the user's own again, so forget the stored value
+  let v = if state.launched.is_empty() && !launching { state.user_fps_cap.take() } else { state.user_fps_cap };
+  if due { v } else { None }
 }
 
 /// Ok(false) when the file or the FramerateCap element is missing; nothing is written then.
@@ -101,6 +103,25 @@ mod tests {
     let mut s = State { user_fps_cap: Some(240), launched: vec![proc(1), proc(2)], ..Default::default() };
     assert_eq!(reconcile(&mut s, &|p| p.pid == 2, false), Some(240));
     assert_eq!(s.launched, vec![proc(2)]);
+    assert_eq!(s.user_fps_cap, Some(240));
+  }
+
+  #[test]
+  fn reconcile_last_window_restores_once_then_forgets() {
+    let mut s = State { user_fps_cap: Some(240), launched: vec![proc(1)], ..Default::default() };
+    assert_eq!(reconcile(&mut s, &|_| false, false), Some(240));
+    assert_eq!(s.user_fps_cap, None);
+    assert_eq!(reconcile(&mut s, &|_| false, false), None);
+    // a later uncapped Dockie window closing must not write the old value
+    s.launched.push(proc(2));
+    assert_eq!(reconcile(&mut s, &|_| false, false), None);
+  }
+
+  #[test]
+  fn reconcile_no_window_nothing_due_forgets_silently() {
+    let mut s = State { user_fps_cap: Some(240), ..Default::default() };
+    assert_eq!(reconcile(&mut s, &|_| true, false), None);
+    assert_eq!(s.user_fps_cap, None);
   }
 
   #[test]
@@ -121,6 +142,7 @@ mod tests {
   fn reconcile_while_launching_ignores_pending() {
     let mut s = State { user_fps_cap: Some(240), restore_pending: true, ..Default::default() };
     assert_eq!(reconcile(&mut s, &|_| true, true), None);
+    assert_eq!(s.user_fps_cap, Some(240));
   }
 
   #[test]

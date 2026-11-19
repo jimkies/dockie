@@ -23,10 +23,11 @@ pub fn reconcile(ctx: &AppCtx) {
   let procs = procs::roblox_processes();
   let Some(v) = fps::reconcile(&mut st, &|l| is_alive(l, &procs), false) else { return };
   drop(st);
-  let failed = fps::apply(v).is_err();
-  if failed {
-    // retry on the next idle tick
-    ctx.state.lock().unwrap().restore_pending = true;
+  if fps::apply(v).is_err() {
+    // retry on the next idle tick; reconcile may have forgotten the value
+    let mut st = ctx.state.lock().unwrap();
+    st.restore_pending = true;
+    st.user_fps_cap = Some(v);
   }
   let _ = ctx.save_state();
 }

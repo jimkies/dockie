@@ -63,6 +63,8 @@ impl Launcher {
           emit(&app, job.user_id, "running", None);
           continue;
         }
+        // the ticker skips while launching, so put back a closed window's exit-write before each job
+        crate::ticker::reconcile(&ctx);
         ctx.launching.store(true, Ordering::SeqCst);
         emit(&app, job.user_id, "launching", None);
         match run(&app, &job).await {
@@ -103,10 +105,13 @@ fn ensure_lock(ctx: &AppCtx) -> Result<(), String> {
 
 fn restore_fps(ctx: &AppCtx) {
   let v = fps::after_launch(&mut ctx.state.lock().unwrap());
-  let _ = ctx.save_state();
-  if let Some(v) = v {
-    let _ = fps::apply(v);
+  if let Some(v) = v
+    && fps::apply(v).is_err()
+  {
+    // the ticker retries with the kept user_fps_cap
+    ctx.state.lock().unwrap().restore_pending = true;
   }
+  let _ = ctx.save_state();
 }
 
 async fn run(app: &AppHandle, job: &Job) -> Result<(), String> {
@@ -139,12 +144,9 @@ async fn run(app: &AppHandle, job: &Job) -> Result<(), String> {
   let cap = acc_cap.or(default_cap);
   let mut capped = false;
   if let Some(cap) = cap {
-    // while a Dockie window is open the file may hold its cap, so trust the stored user value
-    let user_cap = if running_ids(&ctx).is_empty() {
-      std::fs::read_to_string(fps::settings_path()).ok().and_then(|x| fps::read_cap(&x))
-    } else {
-      ctx.state.lock().unwrap().user_fps_cap
-    };
+    // a stored value means Dockie windows may have written their cap into the file, so trust it over the file
+    let stored = ctx.state.lock().unwrap().user_fps_cap;
+    let user_cap = stored.or_else(|| std::fs::read_to_string(fps::settings_path()).ok().and_then(|x| fps::read_cap(&x)));
     // no user value to put back means we must not write a cap
     if user_cap.is_some() {
       fps::before_launch(&mut ctx.state.lock().unwrap(), user_cap);
