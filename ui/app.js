@@ -33,7 +33,7 @@ function showTab(name) {
 function renderBars() {
   $("warn").hidden = !(!snap.lock_ok && snap.roblox_running);
   $("loaderr").hidden = !snap.load_error;
-  $("loaderr").textContent = snap.load_error ? `accounts.json could not be read: ${snap.load_error}. Dockie will not save over it.` : "";
+  $("loaderr").textContent = snap.load_error ? `${snap.load_error}. Dockie will not save over it.` : "";
 }
 let stale = false;
 // Re-rendering would wipe an in-progress edit, so wait until focus leaves rows/settings.
@@ -90,7 +90,7 @@ function renderRow(a) {
   thumb.setAttribute("aria-label", `Focus ${a.username}'s window`);
   thumb.addEventListener("click", () => call("focus", { userId: id }));
   const btn = el("button");
-  btn.addEventListener("click", () => (btn.dataset.act === "stop" ? call("stop", { userId: id }) : call("launch", { userIds: [id], target: null })));
+  btn.addEventListener("click", () => (btn.dataset.act === "stop" ? call("stop", { userId: id }).then(() => unqueue(id)) : call("launch", { userIds: [id], target: null })));
   const signAgain = el("button", { textContent: "Sign in again", hidden: !needsSignIn });
   signAgain.addEventListener("click", () => signIn(id));
 
@@ -172,6 +172,12 @@ async function signIn(refreshUserId) {
   refresh().catch(fail);
 }
 
+// Stop / Stop all cancel queued and not-yet-started launches, which report nothing back.
+function unqueue(id) {
+  const s = launch.get(id)?.state;
+  if (s === "queued" || s === "launching") { launch.delete(id); cells.get(id)?.(); }
+}
+
 function launchSelected(target) {
   const userIds = [...selected];
   if (!userIds.length) return toast("Tick at least one account first.");
@@ -185,7 +191,7 @@ async function renderWindows() {
   const names = new Map((snap?.accounts || []).map((a) => [a.user_id, a.username]));
   const rows = list.map((w) => {
     const focusBtn = el("button", { textContent: "Focus" });
-    focusBtn.addEventListener("click", () => (w.user_id != null ? call("focus", { userId: w.user_id }) : toast("This window is not tied to a Dockie account.")));
+    focusBtn.addEventListener("click", () => call("focus_pid", { pid: w.pid }));
     const close = el("button", { textContent: "Close" });
     close.addEventListener("click", () => call("close_pid", { pid: w.pid }).then(renderWindows));
     const who = w.user_id != null ? "@" + (names.get(w.user_id) ?? w.user_id) : "unknown account";
@@ -197,9 +203,10 @@ async function renderWindows() {
 }
 
 async function closeAll() {
-  const list = await call("roblox_windows");
-  if (!list?.length) return toast("No Roblox windows are open.");
-  if (!confirm(`Close ${list.length} Roblox windows?`)) return;
+  // check processes, not windows: a windowless Roblox still holds the multi-instance lock
+  snap = (await call("get_snapshot")) ?? snap;
+  if (!snap?.roblox_running) return toast("No Roblox windows are open.");
+  if (!confirm("Close all Roblox windows?")) return;
   await call("close_all_roblox");
   await refresh().catch(fail);
   if (!$("tab-tools").hidden) renderWindows();
@@ -227,7 +234,7 @@ $("join-go").addEventListener("click", () => {
 $("launch-sel").addEventListener("click", () => launchSelected(null));
 $("stop-all").addEventListener("click", async () => {
   await call("stop_all");
-  for (const [id, l] of [...launch]) if (l.state === "queued") { launch.delete(id); cells.get(id)?.(); }
+  for (const id of [...launch.keys()]) unqueue(id);
 });
 $("import").addEventListener("click", async () => {
   const r = await call("import_accounts");
@@ -254,7 +261,10 @@ listen("preview", ({ payload: p }) => { previews.set(p.user_id, p); cells.get(p.
 listen("running", ({ payload: p }) => {
   running.clear();
   for (const id of p.user_ids) running.add(id);
-  for (const [id, l] of [...launch]) if (l.state === "running" && !running.has(id)) launch.delete(id);
+  for (const [id, l] of [...launch]) {
+    if (l.state === "running" && !running.has(id)) launch.delete(id);
+    if (l.state === "error" && running.has(id)) launch.delete(id); // its window showed up after all
+  }
   for (const paint of cells.values()) paint();
 });
 listen("notice", ({ payload: p }) => toast(p.message));

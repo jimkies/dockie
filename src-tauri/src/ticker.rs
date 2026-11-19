@@ -79,6 +79,8 @@ fn tick(app: &AppHandle, minimized_since: &mut HashMap<u32, u64>, last_trim: &mu
           s.trim_minimized = false;
           let _ = ctx.store.save_settings(&s);
           let _ = app.emit("notice", serde_json::json!({ "message": "Roblox blocked freeing RAM" }));
+          // the UI re-reads settings, or its next save would switch trimming back on
+          let _ = app.emit("accounts-changed", ());
         }
       }
     }

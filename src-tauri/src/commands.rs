@@ -158,24 +158,25 @@ pub fn focus(ctx: State<AppCtx>, user_id: u64) -> Res<()> {
 }
 
 #[tauri::command]
-pub async fn describe_join(app: AppHandle, user_id: u64, text: String) -> String {
+pub async fn describe_join(app: AppHandle, user_id: u64, text: String) -> Res<String> {
   let ctx = app.state::<AppCtx>();
-  let target = match join::parse_join(&text) {
-    Ok(t) => t,
-    Err(m) => return m,
-  };
+  let target = join::parse_join(&text)?;
   let cached = ctx.labels.lock().unwrap().get(&text).cloned();
   if let Some(l) = cached {
-    return l;
+    return Ok(l);
   }
   let cookie = ctx.cookie(user_id).unwrap_or_default();
-  match ctx.api.describe(&cookie, &target).await {
-    Ok(l) => {
-      ctx.labels.lock().unwrap().insert(text, l.clone());
-      l
-    }
-    Err(m) => m.to_string(),
-  }
+  let l = ctx.api.describe(&cookie, &target).await.map_err(e)?;
+  ctx.labels.lock().unwrap().insert(text, l.clone());
+  Ok(l)
+}
+
+/// Focus for any listed Roblox window, Dockie's or not.
+#[tauri::command]
+pub fn focus_pid(pid: u32) -> Res<()> {
+  let (_, hwnd) = crate::procs::main_window(&[pid]).ok_or("No window to focus")?;
+  crate::procs::focus(hwnd);
+  Ok(())
 }
 
 #[tauri::command]

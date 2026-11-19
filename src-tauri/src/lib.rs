@@ -65,6 +65,7 @@ pub fn run() {
       commands::stop,
       commands::stop_all,
       commands::focus,
+      commands::focus_pid,
       commands::describe_join,
       commands::roblox_windows,
       commands::close_pid,
