@@ -12,7 +12,7 @@ use windows::Win32::System::Threading::{
   PROCESS_SET_QUOTA, PROCESS_TERMINATE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-  EnumWindows, GetWindow, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow,
+  EnumWindows, FindWindowW, GetWindow, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow,
   SetWindowTextW, ShowWindow, GW_OWNER, SW_RESTORE,
 };
 
@@ -49,12 +49,20 @@ fn reg_command(root: HKEY) -> Option<String> {
   Some(String::from_utf16_lossy(&buf))
 }
 
+/// The exe of a quoted `roblox-player` open command; None when the command isn't quoted.
+fn player_exe(cmd: &str) -> Option<Result<PathBuf>> {
+  let path = PathBuf::from(cmd.strip_prefix('"')?.split('"').next()?);
+  let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+  if !name.eq_ignore_ascii_case("RobloxPlayerBeta.exe") {
+    return Some(Err(anyhow!("Roblox is set to open with another launcher ({name}). Dockie needs the official Roblox player.")));
+  }
+  Some(Ok(path))
+}
+
 pub fn roblox_exe() -> Result<PathBuf> {
   for root in [HKEY_CURRENT_USER, HKEY_CLASSES_ROOT] {
-    if let Some(cmd) = reg_command(root) {
-      if let Some(path) = cmd.strip_prefix('"').and_then(|r| r.split('"').next()) {
-        return Ok(PathBuf::from(path));
-      }
+    if let Some(r) = reg_command(root).and_then(|c| player_exe(&c)) {
+      return r;
     }
   }
   bail!("Roblox isn't installed")
@@ -136,6 +144,14 @@ pub fn focus(h: isize) {
       let _ = ShowWindow(hwnd(h), SW_RESTORE);
     }
     let _ = SetForegroundWindow(hwnd(h));
+  }
+}
+
+/// Brings the top-level window with exactly this title to the front, if there is one.
+pub fn focus_title(t: &str) {
+  let t = wide(t);
+  if let Ok(h) = unsafe { FindWindowW(PCWSTR::null(), PCWSTR(t.as_ptr())) } {
+    focus(h.0 as isize);
   }
 }
 
@@ -222,6 +238,15 @@ mod tests {
     assert!(acquire_lock(&m, &e).is_err());
     drop(first);
     assert!(acquire_lock(&m, &e).is_ok());
+  }
+
+  #[test]
+  fn player_exe_must_be_the_official_player() {
+    let ok = player_exe(r#""C:\R\Versions\version-1\RobloxPlayerBeta.exe" "%1""#).unwrap().unwrap();
+    assert!(ok.ends_with("RobloxPlayerBeta.exe"));
+    let err = player_exe(r#""C:\B\Bloxstrap.exe" -player "%1""#).unwrap().unwrap_err().to_string();
+    assert_eq!(err, "Roblox is set to open with another launcher (Bloxstrap.exe). Dockie needs the official Roblox player.");
+    assert!(player_exe("unquoted.exe %1").is_none());
   }
 
   // Needs Roblox installed.

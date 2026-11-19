@@ -21,6 +21,11 @@ fn quit(app: tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  // two copies would overwrite each other's files; checked before any window exists, and held until exit
+  let Ok(_instance) = procs::acquire_lock("Dockie_instanceMutex", "Dockie_instanceEvent") else {
+    procs::focus_title("Dockie");
+    return;
+  };
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .setup(|app| {

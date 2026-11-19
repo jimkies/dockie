@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -65,7 +66,12 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
   }
   let mut tmp = path.as_os_str().to_owned();
   tmp.push(".tmp");
-  std::fs::write(&tmp, bytes)?;
+  {
+    // flushed before the rename so a crash can't leave an empty file in place of the old one
+    let mut f = std::fs::File::create(&tmp)?;
+    f.write_all(bytes)?;
+    f.sync_all()?;
+  }
   std::fs::rename(&tmp, path)
 }
 

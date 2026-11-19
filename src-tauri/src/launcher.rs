@@ -21,6 +21,8 @@ pub struct Launcher {
   app: AppHandle,
   queue: Arc<Mutex<VecDeque<Job>>>,
   notify: Arc<Notify>,
+  // the account being launched; Stop and Stop all clear it
+  current: Arc<Mutex<Option<u64>>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -43,11 +45,17 @@ fn emit(app: &AppHandle, user_id: u64, state: &'static str, message: Option<Stri
 
 impl Launcher {
   pub fn start(app: AppHandle) -> Launcher {
-    let l = Launcher { app: app.clone(), queue: Arc::default(), notify: Arc::default() };
-    let (queue, notify) = (l.queue.clone(), l.notify.clone());
+    let l = Launcher { app: app.clone(), queue: Arc::default(), notify: Arc::default(), current: Arc::default() };
+    let (queue, notify, current) = (l.queue.clone(), l.notify.clone(), l.current.clone());
     tauri::async_runtime::spawn(async move {
       loop {
-        let job = queue.lock().unwrap().pop_front();
+        let job = {
+          let mut q = queue.lock().unwrap();
+          let job = q.pop_front();
+          // set under the queue lock so a Stop can't fall between the pop and this
+          *current.lock().unwrap() = job.as_ref().map(|j| j.user_id);
+          job
+        };
         let Some(job) = job else {
           notify.notified().await;
           continue;
@@ -67,7 +75,10 @@ impl Launcher {
         crate::ticker::reconcile(&ctx);
         ctx.launching.store(true, Ordering::SeqCst);
         emit(&app, job.user_id, "launching", None);
-        match run(&app, &job).await {
+        let r = run(&app, &job, &current).await;
+        let stopped = current.lock().unwrap().take() != Some(job.user_id);
+        match r {
+          _ if stopped => {} // the UI already reset the row
           Ok(()) => emit(&app, job.user_id, "running", None),
           Err(m) => emit(&app, job.user_id, "error", Some(m)),
         }
@@ -85,8 +96,17 @@ impl Launcher {
     self.notify.notify_one();
   }
 
+  /// Drops the account's queued jobs, and its current launch if Roblox hasn't been started yet.
+  pub fn cancel(&self, user_id: u64) {
+    let mut q = self.queue.lock().unwrap();
+    q.retain(|j| j.user_id != user_id);
+    self.current.lock().unwrap().take_if(|u| *u == user_id);
+  }
+
   pub fn clear(&self) {
-    self.queue.lock().unwrap().clear();
+    let mut q = self.queue.lock().unwrap();
+    q.clear();
+    *self.current.lock().unwrap() = None;
   }
 }
 
@@ -114,7 +134,7 @@ fn restore_fps(ctx: &AppCtx) {
   let _ = ctx.save_state();
 }
 
-async fn run(app: &AppHandle, job: &Job) -> Result<(), String> {
+async fn run(app: &AppHandle, job: &Job, current: &Mutex<Option<u64>>) -> Result<(), String> {
   let ctx = app.state::<AppCtx>();
   let (username, acc_cap, join) = {
     let list = ctx.accounts.lock().unwrap();
@@ -139,6 +159,9 @@ async fn run(app: &AppHandle, job: &Job) -> Result<(), String> {
   let resolved = ctx.api.resolve(&cookie, &target).await.map_err(ticket_err)?;
   let ticket = ctx.api.auth_ticket(&cookie).await.map_err(ticket_err)?;
   let uri = launch_uri(&ticket, &resolved, now_ms(), now_ms());
+  if *current.lock().unwrap() != Some(job.user_id) {
+    return Err("Stopped".into());
+  }
 
   let default_cap = ctx.settings.lock().unwrap().fps_cap_default;
   let cap = acc_cap.or(default_cap);

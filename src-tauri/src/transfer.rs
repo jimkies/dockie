@@ -57,7 +57,7 @@ pub fn import_into(accounts: &mut Vec<Account>, items: Vec<ExportAccount>, now: 
       added_at: now,
       note: it.note,
       join: it.join,
-      fps_cap: it.fps_cap,
+      fps_cap: it.fps_cap.filter(|&c| c >= 1), // a bad cap in the file means "use the default"
       cookie_dpapi: protect(&it.cookie)?,
       status: AccountStatus::Unchecked,
     };
@@ -140,6 +140,14 @@ mod tests {
     assert_eq!(list[0].cookie_dpapi, "p-c1");
     assert_eq!(list[1].added_at, 999);
     assert!(list.iter().all(|a| a.status == AccountStatus::Unchecked && a.avatar_url.is_none()));
+  }
+
+  #[test]
+  fn import_drops_fps_cap_below_1() {
+    let mut list = vec![];
+    let items = vec![ExportAccount { fps_cap: Some(0), ..ex(1, "") }, ExportAccount { fps_cap: Some(60), ..ex(2, "") }];
+    import_into(&mut list, items, 0, &id).unwrap();
+    assert_eq!((list[0].fps_cap, list[1].fps_cap), (None, Some(60)));
   }
 
   #[test]

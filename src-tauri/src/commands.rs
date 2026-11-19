@@ -26,6 +26,13 @@ fn change<T>(app: &AppHandle, f: impl FnOnce(&mut Vec<Account>) -> Res<T>) -> Re
   Ok(out)
 }
 
+fn check_cap(cap: Option<i32>) -> Res<()> {
+  if cap.is_some_and(|c| c < 1) {
+    return Err("FPS cap must be at least 1".into());
+  }
+  Ok(())
+}
+
 fn edit(app: &AppHandle, user_id: u64, f: impl FnOnce(&mut Account)) -> Res<()> {
   change(app, |l| Ok(f(l.iter_mut().find(|a| a.user_id == user_id).ok_or("Account not found")?)))
 }
@@ -69,13 +76,17 @@ pub fn set_join(app: AppHandle, user_id: u64, join: String) -> Res<()> {
 
 #[tauri::command]
 pub fn set_fps_cap(app: AppHandle, user_id: u64, cap: Option<i32>) -> Res<()> {
+  check_cap(cap)?;
   edit(&app, user_id, |a| a.fps_cap = cap)
 }
 
 #[tauri::command]
 pub fn set_settings(ctx: State<AppCtx>, settings: Settings) -> Res<()> {
+  check_cap(settings.fps_cap_default)?;
+  // saved under the lock so the ticker's own settings write can't interleave
+  let mut s = ctx.settings.lock().unwrap();
   ctx.store.save_settings(&settings).map_err(e)?;
-  *ctx.settings.lock().unwrap() = settings;
+  *s = settings;
   Ok(())
 }
 
@@ -130,7 +141,8 @@ pub fn launch(ctx: State<AppCtx>, launcher: State<Launcher>, user_ids: Vec<u64>,
 }
 
 #[tauri::command]
-pub fn stop(ctx: State<AppCtx>, user_id: u64) {
+pub fn stop(ctx: State<AppCtx>, launcher: State<Launcher>, user_id: u64) {
+  launcher.cancel(user_id);
   launcher::stop(&ctx, Some(user_id))
 }
 
@@ -173,6 +185,10 @@ pub fn roblox_windows(ctx: State<AppCtx>) -> Vec<RobloxWindow> {
 
 #[tauri::command]
 pub fn close_pid(pid: u32) -> Res<()> {
+  // the list may be stale and the PID reused by another app
+  if !crate::procs::roblox_processes().iter().any(|p| p.pid == pid) {
+    return Err("That Roblox window is already closed".into());
+  }
   crate::procs::kill(pid).map_err(e)
 }
 

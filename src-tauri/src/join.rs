@@ -85,11 +85,13 @@ pub fn parse_join(input: &str) -> Result<JoinTarget, String> {
 pub fn launch_uri(ticket: &str, target: &Resolved, launch_time_ms: u64, tracker_id: u64) -> String {
     let t = tracker_id;
     let common = format!("browserTrackerId={t}&isPlayTogetherGame=false");
+    // link-supplied text: escaped so it can't add parameters or a '+' that splits the roblox-player link
+    let esc = |v: &str| url::form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>();
     let request = match target {
         Resolved::Home => String::new(),
         Resolved::Game { place_id } => format!("RequestGame&{common}&placeId={place_id}"),
-        Resolved::PrivateServer { place_id, link_code } => format!("RequestPrivateGame&{common}&placeId={place_id}&linkCode={link_code}"),
-        Resolved::Server { place_id, job_id } => format!("RequestGameJob&{common}&placeId={place_id}&gameId={job_id}"),
+        Resolved::PrivateServer { place_id, link_code } => format!("RequestPrivateGame&{common}&placeId={place_id}&linkCode={}", esc(link_code)),
+        Resolved::Server { place_id, job_id } => format!("RequestGameJob&{common}&placeId={place_id}&gameId={}", esc(job_id)),
         Resolved::Follow { user_id } => format!("RequestFollowUser&{common}&userId={user_id}"),
     };
     let (mode, launcher) = if request.is_empty() {
@@ -153,5 +155,13 @@ mod tests {
     }
     #[test] fn uri_private() { assert!(launch_uri("T", &Resolved::PrivateServer { place_id: 1, link_code: "C".into() }, 0, 7).contains("RequestPrivateGame%26browserTrackerId%3D7%26isPlayTogetherGame%3Dfalse%26placeId%3D1%26linkCode%3DC")); }
     #[test] fn uri_server() { assert!(launch_uri("T", &Resolved::Server { place_id: 1, job_id: "J".into() }, 0, 7).contains("RequestGameJob%26browserTrackerId%3D7%26isPlayTogetherGame%3Dfalse%26placeId%3D1%26gameId%3DJ")); }
+    #[test] fn uri_link_code_stays_in_its_value() {
+        let u = launch_uri("T", &Resolved::PrivateServer { place_id: 1, link_code: "C&userId=9 x".into() }, 0, 7);
+        let enc = u.split('+').find_map(|p| p.strip_prefix("placelauncherurl:")).unwrap();
+        let inner = url::form_urlencoded::parse(format!("u={enc}").as_bytes()).next().unwrap().1.into_owned();
+        let q: Vec<(String, String)> = Url::parse(&inner).unwrap().query_pairs().into_owned().collect();
+        assert!(q.contains(&("linkCode".into(), "C&userId=9 x".into())));
+        assert!(!q.iter().any(|(k, _)| k == "userId"));
+    }
     #[test] fn uri_follow() { assert!(launch_uri("T", &Resolved::Follow { user_id: 5 }, 0, 7).contains("RequestFollowUser%26browserTrackerId%3D7%26isPlayTogetherGame%3Dfalse%26userId%3D5")); }
 }
