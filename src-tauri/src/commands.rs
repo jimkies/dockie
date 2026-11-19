@@ -1,6 +1,7 @@
 use crate::app::{AddResult, AppCtx, Snapshot, add_account, check_all, now_ms};
 use crate::store::{Account, Settings};
-use crate::{dpapi, login, transfer};
+use crate::launcher::{self, Job, Launcher, RobloxWindow};
+use crate::{dpapi, join, login, transfer};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -113,4 +114,69 @@ pub async fn import_accounts(app: AppHandle) -> Res<(usize, usize)> {
 #[tauri::command]
 pub fn open_data_folder(ctx: State<AppCtx>) -> Res<()> {
   std::process::Command::new("explorer").arg(&ctx.store.dir).spawn().map(|_| ()).map_err(e)
+}
+
+#[tauri::command]
+pub fn launch(ctx: State<AppCtx>, launcher: State<Launcher>, user_ids: Vec<u64>, target: Option<String>) -> Res<()> {
+  if let Some(t) = &target {
+    join::parse_join(t)?;
+  }
+  let (to_launch, to_focus) = launcher::split_running(&user_ids, &launcher::running_ids(&ctx));
+  for id in to_focus {
+    let _ = launcher::focus_account(&ctx, id);
+  }
+  launcher.enqueue(to_launch.into_iter().map(|user_id| Job { user_id, target: target.clone() }).collect());
+  Ok(())
+}
+
+#[tauri::command]
+pub fn stop(ctx: State<AppCtx>, user_id: u64) {
+  launcher::stop(&ctx, Some(user_id))
+}
+
+#[tauri::command]
+pub fn stop_all(ctx: State<AppCtx>, launcher: State<Launcher>) {
+  launcher.clear();
+  launcher::stop(&ctx, None)
+}
+
+#[tauri::command]
+pub fn focus(ctx: State<AppCtx>, user_id: u64) -> Res<()> {
+  launcher::focus_account(&ctx, user_id)
+}
+
+#[tauri::command]
+pub async fn describe_join(app: AppHandle, user_id: u64, text: String) -> String {
+  let ctx = app.state::<AppCtx>();
+  let target = match join::parse_join(&text) {
+    Ok(t) => t,
+    Err(m) => return m,
+  };
+  let cached = ctx.labels.lock().unwrap().get(&text).cloned();
+  if let Some(l) = cached {
+    return l;
+  }
+  let cookie = ctx.cookie(user_id).unwrap_or_default();
+  match ctx.api.describe(&cookie, &target).await {
+    Ok(l) => {
+      ctx.labels.lock().unwrap().insert(text, l.clone());
+      l
+    }
+    Err(m) => m.to_string(),
+  }
+}
+
+#[tauri::command]
+pub fn roblox_windows(ctx: State<AppCtx>) -> Vec<RobloxWindow> {
+  launcher::windows(&ctx)
+}
+
+#[tauri::command]
+pub fn close_pid(pid: u32) -> Res<()> {
+  crate::procs::kill(pid).map_err(e)
+}
+
+#[tauri::command]
+pub fn close_all_roblox(ctx: State<AppCtx>) -> bool {
+  launcher::close_all(&ctx)
 }
