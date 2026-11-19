@@ -1,5 +1,5 @@
 use crate::app::{AppCtx, is_alive};
-use crate::procs::{self, ProcInfo};
+use crate::procs;
 use crate::{fps, preview};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -14,15 +14,21 @@ struct Preview {
 }
 
 /// Drops dead launched entries and restores the user's FPS cap; skipped while a launch is in flight.
-pub fn reconcile(ctx: &AppCtx, procs: &[ProcInfo]) {
+pub fn reconcile(ctx: &AppCtx) {
+  let mut st = ctx.state.lock().unwrap();
   if ctx.launching.load(Ordering::SeqCst) {
     return;
   }
-  let cap = fps::reconcile(&mut ctx.state.lock().unwrap(), &|l| is_alive(l, procs), false);
-  if let Some(v) = cap {
-    let _ = fps::apply(v);
-    let _ = ctx.save_state();
+  // snapshot under the state lock: launches push entries under it, so every entry was spawned before this
+  let procs = procs::roblox_processes();
+  let Some(v) = fps::reconcile(&mut st, &|l| is_alive(l, &procs), false) else { return };
+  drop(st);
+  let failed = fps::apply(v).is_err();
+  if failed {
+    // retry on the next idle tick
+    ctx.state.lock().unwrap().restore_pending = true;
   }
+  let _ = ctx.save_state();
 }
 
 pub fn start(app: AppHandle) {
@@ -32,15 +38,15 @@ pub fn start(app: AppHandle) {
     let mut last_trim: HashMap<u32, u64> = HashMap::new();
     loop {
       std::thread::sleep(std::time::Duration::from_secs(1));
-      tick(&app, &mut minimized_since, &mut last_trim);
+      let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tick(&app, &mut minimized_since, &mut last_trim)));
     }
   });
 }
 
 fn tick(app: &AppHandle, minimized_since: &mut HashMap<u32, u64>, last_trim: &mut HashMap<u32, u64>) {
   let ctx = app.state::<AppCtx>();
+  reconcile(&ctx);
   let procs = procs::roblox_processes();
-  reconcile(&ctx, &procs);
   let alive: Vec<_> = ctx.state.lock().unwrap().launched.iter().filter(|l| is_alive(l, &procs)).cloned().collect();
   let names: HashMap<u64, String> = ctx.accounts.lock().unwrap().iter().map(|a| (a.user_id, a.username.clone())).collect();
   let mut trim_on = ctx.settings.lock().unwrap().trim_minimized;
