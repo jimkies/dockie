@@ -38,6 +38,8 @@ pub fn parse_join(input: &str) -> Result<JoinTarget, String> {
         }
     }
     let url = match s.strip_prefix("roblox://") {
+        // Bare `roblox://placeId=..` is all query; `roblox://experiences/start?..` has a path.
+        Some(rest) if rest.contains(['/', '?']) => Url::parse(&format!("https://www.roblox.com/{rest}")),
         Some(rest) => Url::parse(&format!("https://www.roblox.com/?{rest}")),
         None if s.contains("://") => Url::parse(s),
         None => Url::parse(&format!("https://{s}")),
@@ -127,6 +129,10 @@ mod tests {
     #[test] fn roblox_scheme() {
         assert_eq!(parse_join(&format!("roblox://placeId=920587237&jobId={JOB}")), Ok(Server { place_id: 920587237, job_id: JOB.into() }));
     }
+    #[test] fn roblox_scheme_path() {
+        assert_eq!(parse_join(&format!("roblox://experiences/start?placeId=920587237&gameInstanceId={JOB}")), Ok(Server { place_id: 920587237, job_id: JOB.into() }));
+    }
+    #[test] fn roblox_scheme_path_place_only() { assert_eq!(parse_join("roblox://experiences/start?placeId=920587237"), Ok(Game { place_id: 920587237 })); }
     #[test] fn x_colon_y() { assert_eq!(parse_join(&format!("920587237:{JOB}")), Ok(Server { place_id: 920587237, job_id: JOB.into() })); }
     #[test] fn start_place_only() { assert_eq!(parse_join("https://www.roblox.com/games/start?placeId=920587237"), Ok(Game { place_id: 920587237 })); }
     #[test] fn user_profile() { assert_eq!(parse_join("https://www.roblox.com/users/1234567/profile"), Ok(FollowUserId { user_id: 1234567 })); }
