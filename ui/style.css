@@ -40,7 +40,8 @@ main { padding: 12px 14px; }
 .join-label { font-size: 12px; color: var(--muted); }
 .join-label.bad { color: var(--bad); }
 .preview { width: 120px; height: 68px; object-fit: cover; border-radius: 4px; background: var(--bg); cursor: pointer; flex: none; }
-.minimized { width: 120px; height: 68px; display: grid; place-items: center; border-radius: 4px; background: var(--bg); color: var(--muted); font-size: 12px; cursor: pointer; flex: none; }
+.thumb { padding: 0; border: 0; background: none; flex: none; }
+.minimized { width: 120px; height: 68px; display: grid; place-items: center; border-radius: 4px; background: var(--bg); color: var(--muted); font-size: 12px; cursor: pointer; }
 .join { width: 260px; }
 .fps { width: 70px; }
 .note { width: 170px; }

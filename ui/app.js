@@ -35,8 +35,13 @@ function renderBars() {
   $("loaderr").hidden = !snap.load_error;
   $("loaderr").textContent = snap.load_error ? `accounts.json could not be read: ${snap.load_error}. Dockie will not save over it.` : "";
 }
+let stale = false;
+// Re-rendering would wipe an in-progress edit, so wait until focus leaves rows/settings.
+const editing = () => document.activeElement?.matches("#rows input:not([type=checkbox]), #tab-settings input:not([type=checkbox]), details.menu *");
 async function refresh() {
   snap = await invoke("get_snapshot");
+  if (editing()) { stale = true; return; }
+  stale = false;
   running.clear();
   for (const a of snap.accounts) if (a.running) running.add(a.user_id);
   renderBars();
@@ -79,7 +84,11 @@ function renderRow(a) {
 
   const badge = el("span", { className: "badge" });
   const errText = el("span", { className: "err-text" });
-  const thumb = el("span");
+  const img = el("img", { className: "preview", alt: "" });
+  const label = el("span", { className: "minimized", textContent: "minimized" });
+  const thumb = el("button", { className: "thumb" }, img, label);
+  thumb.setAttribute("aria-label", `Focus ${a.username}'s window`);
+  thumb.addEventListener("click", () => call("focus", { userId: id }));
   const btn = el("button");
   btn.addEventListener("click", () => (btn.dataset.act === "stop" ? call("stop", { userId: id }) : call("launch", { userIds: [id], target: null })));
   const signAgain = el("button", { textContent: "Sign in again", hidden: !needsSignIn });
@@ -103,7 +112,7 @@ function renderRow(a) {
   summary.setAttribute("aria-label", "More actions for " + a.username);
   const menu = el("details", { className: "menu" }, summary);
   const remove = el("button", { textContent: "Remove" });
-  remove.addEventListener("click", () => confirm(`Remove ${a.username}?`) && call("remove_account", { userId: id }).then(refresh));
+  remove.addEventListener("click", () => confirm(`Remove ${a.username}?`) && call("remove_account", { userId: id }).then(() => refresh().catch(fail)));
   const copy = el("button", { textContent: "Copy username" });
   copy.addEventListener("click", () => { navigator.clipboard.writeText(a.username).catch(fail); menu.open = false; });
   menu.append(el("div", { className: "pop" }, copy, remove));
@@ -127,11 +136,12 @@ function renderRow(a) {
     btn.textContent = btn.dataset.act === "stop" ? "Stop" : "Launch";
     btn.hidden = needsSignIn;
     const p = previews.get(id);
-    let t = null;
-    if (isRunning && p?.minimized) t = el("button", { className: "minimized", textContent: "minimized" });
-    else if (isRunning && p?.image) t = el("img", { className: "preview", src: p.image, alt: "Window preview", tabIndex: 0 });
-    if (t) t.addEventListener("click", () => call("focus", { userId: id }));
-    thumb.replaceChildren(...(t ? [t] : []));
+    const mini = isRunning && !!p?.minimized;
+    const image = isRunning && !mini && p?.image ? p.image : "";
+    thumb.hidden = !mini && !image;
+    label.hidden = !mini;
+    img.hidden = !image;
+    if (image && img.getAttribute("src") !== image) img.src = image;
   };
   cells.set(id, paint);
   paint();
@@ -156,7 +166,7 @@ async function signIn(refreshUserId) {
   } catch (e) {
     if (!String(e).includes("cancelled")) fail(e);
   }
-  refresh();
+  refresh().catch(fail);
 }
 
 function launchSelected(target) {
@@ -185,9 +195,10 @@ async function renderWindows() {
 
 async function closeAll() {
   const list = await call("roblox_windows");
-  if (!list || !confirm(`Close ${list.length} Roblox windows?`)) return;
+  if (!list?.length) return toast("No Roblox windows are open.");
+  if (!confirm(`Close ${list.length} Roblox windows?`)) return;
   await call("close_all_roblox");
-  await refresh();
+  await refresh().catch(fail);
   if (!$("tab-tools").hidden) renderWindows();
 }
 
@@ -218,7 +229,7 @@ $("stop-all").addEventListener("click", async () => {
 $("import").addEventListener("click", async () => {
   const r = await call("import_accounts");
   if (r) toast(`Imported ${r[0]} new, ${r[1]} replaced.`);
-  refresh();
+  refresh().catch(fail);
 });
 $("export").addEventListener("click", () => call("export_accounts", { userIds: [...selected] }));
 $("paste").addEventListener("click", () => { $("paste-dlg").returnValue = ""; $("paste-text").value = ""; $("paste-dlg").showModal(); });
@@ -227,13 +238,14 @@ $("paste-dlg").addEventListener("close", async () => {
   $("paste-text").value = "";
   if ($("paste-dlg").returnValue !== "ok" || !cookie) return;
   try { await invoke("add_cookie", { cookie }); } catch (e) { fail(e); }
-  refresh();
+  refresh().catch(fail);
 });
 $("set-fps").addEventListener("blur", saveSettings);
 $("set-trim").addEventListener("change", saveSettings);
 $("open-data").addEventListener("click", () => call("open_data_folder"));
 
-listen("accounts-changed", refresh);
+listen("accounts-changed", () => refresh().catch(fail));
+document.addEventListener("focusout", () => setTimeout(() => stale && !editing() && refresh().catch(fail)));
 listen("launch-status", ({ payload: p }) => { launch.set(p.user_id, p); cells.get(p.user_id)?.(); });
 listen("preview", ({ payload: p }) => { previews.set(p.user_id, p); cells.get(p.user_id)?.(); });
 listen("running", ({ payload: p }) => {
