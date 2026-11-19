@@ -170,6 +170,9 @@ pub fn trim(pid: u32) -> Result<()> {
 
 pub struct MultiLock(HANDLE, HANDLE);
 
+// kernel handles may be closed from any thread
+unsafe impl Send for MultiLock {}
+
 impl Drop for MultiLock {
   fn drop(&mut self) {
     unsafe {
