@@ -9,9 +9,15 @@ pub mod preview;
 pub mod procs;
 pub mod roblox_api;
 pub mod store;
+pub mod ticker;
 pub mod transfer;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+
+#[tauri::command]
+fn quit(app: tauri::AppHandle) {
+  app.exit(0);
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -21,10 +27,20 @@ pub fn run() {
       let local = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?;
       let ctx = app::AppCtx::new(std::path::PathBuf::from(local).join("Dockie"));
       *ctx.lock.lock().unwrap() = procs::acquire_lock(procs::LOCK_NAMES.0, procs::LOCK_NAMES.1).ok();
+      ticker::reconcile(&ctx, &procs::roblox_processes());
       app.manage(ctx);
       app.manage(launcher::Launcher::start(app.handle().clone()));
       tauri::async_runtime::spawn(app::check_all(app.handle().clone()));
+      ticker::start(app.handle().clone());
       Ok(())
+    })
+    .on_window_event(|window, event| {
+      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        if window.label() == "main" && ticker::any_alive(&window.state::<app::AppCtx>()) {
+          api.prevent_close();
+          let _ = window.emit("confirm-quit", ());
+        }
+      }
     })
     .invoke_handler(tauri::generate_handler![
       commands::get_snapshot,
@@ -48,6 +64,7 @@ pub fn run() {
       commands::roblox_windows,
       commands::close_pid,
       commands::close_all_roblox,
+      quit,
     ])
     .run(tauri::generate_context!())
     .expect("error while building tauri application");
