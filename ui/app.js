@@ -5,17 +5,27 @@ const ask = (msg) => window.__TAURI__.dialog.ask(msg, { title: "Dockie", kind: "
 const $ = (id) => document.getElementById(id);
 
 let snap = null;
+let firstRender = true;
 const selected = new Set();
 const launch = new Map();   // user_id -> { state, message }
 const previews = new Map(); // user_id -> { minimized, image }
 const running = new Set();
-const cells = new Map();    // user_id -> paint() for that row
+const cells = new Map();    // user_id -> paint() for that tile
 
 function el(tag, props = {}, ...kids) {
   const e = document.createElement(tag);
   Object.assign(e, props); // props are textContent/className/etc, never HTML
   e.append(...kids);
   return e;
+}
+function svg(d) {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 24 24");
+  s.setAttribute("aria-hidden", "true");
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("d", d);
+  s.append(p);
+  return s;
 }
 function toast(message) {
   const t = el("div", { className: "toast", textContent: message });
@@ -25,21 +35,45 @@ function toast(message) {
 const fail = (e) => toast(String(e));
 const call = (cmd, args) => invoke(cmd, args).catch(fail);
 
+// ---- menus: a trigger with aria-haspopup opens the .menu next to it ----
+function closeMenus(except) {
+  for (const m of document.querySelectorAll(".menu.open")) {
+    if (m === except) continue;
+    m.classList.remove("open");
+    m.previousElementSibling?.setAttribute("aria-expanded", "false");
+  }
+}
+document.addEventListener("click", (e) => {
+  const trigger = e.target.closest("[aria-haspopup=menu]");
+  if (trigger) {
+    const menu = trigger.nextElementSibling;
+    const open = !menu.classList.contains("open");
+    closeMenus(menu);
+    menu.classList.toggle("open", open);
+    trigger.setAttribute("aria-expanded", String(open));
+    return;
+  }
+  closeMenus(); // any other click, including a menu item, closes menus
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+
 // ---- shell ----
 function showTab(name) {
   for (const b of document.querySelectorAll("[role=tab]")) b.setAttribute("aria-selected", b.dataset.tab === name);
-  for (const t of ["accounts", "tools", "settings"]) $("tab-" + t).hidden = t !== name;
+  for (const t of ["accounts", "windows", "settings"]) $("tab-" + t).hidden = t !== name;
   clearInterval(showTab.timer);
-  if (name === "tools") { renderWindows(); showTab.timer = setInterval(renderWindows, 2000); }
+  if (name === "windows") { renderWindows(); showTab.timer = setInterval(renderWindows, 2000); }
 }
 function renderBars() {
-  $("warn").hidden = !(!snap.lock_ok && snap.roblox_running);
+  const w = warnText(snap);
+  $("warn").hidden = !w;
+  $("warn-text").textContent = w ?? "";
   $("loaderr").hidden = !snap.load_error;
   $("loaderr").textContent = snap.load_error ? `${snap.load_error}. Dockie will not save over it.` : "";
 }
 let stale = false;
-// Re-rendering would wipe an in-progress edit, so wait until focus leaves rows/settings.
-const editing = () => document.activeElement?.matches("#rows input:not([type=checkbox]), #tab-settings input:not([type=checkbox])");
+// Re-rendering would wipe an in-progress settings edit, so wait until focus leaves it.
+const editing = () => document.activeElement?.matches("#tab-settings input:not([type=checkbox])");
 async function refresh() {
   snap = await invoke("get_snapshot");
   if (editing()) { stale = true; return; }
@@ -52,116 +86,136 @@ async function refresh() {
 }
 
 // ---- accounts ----
-// FPS control lives here only: swap for a dropdown later. Calls onSave(number | null).
-function fpsInput(value, onSave) {
-  const i = el("input", { type: "number", min: 1, className: "fps", placeholder: "default", value: value ?? "" });
-  i.setAttribute("aria-label", "FPS cap");
-  i.addEventListener("blur", () => onSave(i.value === "" ? null : Number(i.value)));
-  return i;
-}
-function textInput(cls, label, placeholder, value, onSave) {
-  const i = el("input", { type: "text", className: cls, placeholder, value });
-  i.setAttribute("aria-label", label);
-  i.addEventListener("blur", () => onSave(i.value));
-  return i;
-}
-
 function renderAccounts() {
-  $("empty").hidden = snap.accounts.length > 0;
+  const has = snap.accounts.length > 0;
+  $("empty").hidden = has;
+  $("grid").hidden = !has;
+  for (const b of $("tab-accounts").querySelectorAll(".toolbar")) b.hidden = !has;
   cells.clear();
-  $("rows").replaceChildren(...snap.accounts.map(renderRow));
+  const tiles = snap.accounts.map((a, i) => renderTile(a, i));
   for (const id of [...selected]) if (!cells.has(id)) selected.delete(id);
+  $("grid").replaceChildren(...tiles, addTile(tiles.length));
+  firstRender = !has; // stagger only the first time tiles appear
+  updateToolbar();
 }
 
-function renderRow(a) {
-  const id = a.user_id;
-  const needsSignIn = a.status === "needs_sign_in";
+function avatar(a) {
+  if (a.avatar_url) return el("img", { className: "av", alt: "", src: a.avatar_url });
+  return el("div", { className: "av", textContent: (a.display_name || a.username || "?").slice(0, 1).toUpperCase() });
+}
 
+function renderTile(a, i) {
+  const id = a.user_id;
+  const tile = el("article", { className: "tile" });
+  tile.setAttribute("aria-label", a.display_name);
+  if (firstRender) { tile.classList.add("enter"); tile.style.setProperty("--i", i); }
+
+  // preview area: one reused <button> so per-second updates only swap the src
+  const img = el("img", { alt: "" });
+  const ph = el("span", { className: "ph" });
+  const thumb = el("button", { className: "thumb" }, img, ph);
+  thumb.addEventListener("click", () => running.has(id) && call("focus", { userId: id }));
   const check = el("input", { type: "checkbox", checked: selected.has(id) });
   check.setAttribute("aria-label", "Select " + a.username);
-  check.addEventListener("change", () => (check.checked ? selected.add(id) : selected.delete(id)));
-
-  const av = el("img", { className: "av", alt: "" });
-  if (a.avatar_url) av.src = a.avatar_url;
-
-  const badge = el("span", { className: "badge" });
-  const errText = el("span", { className: "err-text" });
-  const img = el("img", { className: "preview", alt: "" });
-  const label = el("span", { className: "minimized", textContent: "minimized" });
-  const thumb = el("button", { className: "thumb" }, img, label);
-  thumb.setAttribute("aria-label", `Focus ${a.username}'s window`);
-  thumb.addEventListener("click", () => call("focus", { userId: id }));
-  const btn = el("button");
-  btn.addEventListener("click", () => (btn.dataset.act === "stop" ? call("stop", { userId: id }).then(() => unqueue(id)) : call("launch", { userIds: [id], target: null })));
-  const signAgain = el("button", { textContent: "Sign in again", hidden: !needsSignIn });
-  signAgain.addEventListener("click", () => signIn(id));
-
-  const joinLabel = el("div", { className: "join-label" });
-  const describe = async (text) => {
-    joinLabel.className = "join-label";
-    joinLabel.textContent = "";
-    if (!text.trim()) return;
-    try { joinLabel.textContent = await invoke("describe_join", { userId: id, text }); }
-    catch (e) { joinLabel.textContent = String(e); joinLabel.classList.add("bad"); }
-  };
-  const join = textInput("join", "Join link, id or @user", "Join: link / id / @user", a.join, (v) => {
-    call("set_join", { userId: id, join: v });
-    describe(v);
+  check.addEventListener("change", () => {
+    check.checked ? selected.add(id) : selected.delete(id);
+    tile.classList.toggle("sel", check.checked);
+    updateToolbar();
   });
-  describe(a.join);
+  tile.classList.toggle("sel", check.checked);
+  const pill = el("span", { className: "pill" });
+  const shot = el("div", { className: "shot" }, thumb, el("label", { className: "pick" }, check), pill);
 
-  const summary = el("summary", { textContent: "⋯" });
-  summary.setAttribute("aria-label", "More actions for " + a.username);
-  const menu = el("details", { className: "menu" }, summary);
-  const remove = el("button", { textContent: "Remove" });
+  // body
+  const who = el("div", { className: "who" },
+    el("div", { className: "name", textContent: a.display_name }),
+    el("div", { className: "handle", textContent: "@" + a.username },
+      ...(a.note ? [el("span", { className: "note", textContent: " · " + a.note })] : [])));
+  const btn = el("button", { className: "btn" });
+  btn.addEventListener("click", () => {
+    const act = btn.dataset.act;
+    if (act === "stop") call("stop", { userId: id }).then(() => unqueue(id));
+    else if (act === "signin") signIn(id);
+    else call("launch", { userIds: [id], target: null });
+  });
+  const more = el("button", { className: "btn icon ghost" }, svg("M5 12h.01M12 12h.01M19 12h.01"));
+  more.setAttribute("aria-haspopup", "menu");
+  more.setAttribute("aria-expanded", "false");
+  more.setAttribute("aria-label", "More actions for " + a.username);
+  const edit = el("button", { textContent: "Edit…" });
+  edit.setAttribute("role", "menuitem");
+  edit.addEventListener("click", () => openEdit(a));
+  const copy = el("button", { textContent: "Copy username" });
+  copy.setAttribute("role", "menuitem");
+  copy.addEventListener("click", () => navigator.clipboard.writeText(a.username).then(() => toast(`Copied @${a.username}`), fail));
+  const remove = el("button", { className: "danger", textContent: "Remove" });
+  remove.setAttribute("role", "menuitem");
   remove.addEventListener("click", async () => {
-    menu.open = false;
     if (await ask(`Remove ${a.username}?`)) call("remove_account", { userId: id }).then(() => refresh().catch(fail));
   });
-  const copy = el("button", { textContent: "Copy username" });
-  copy.addEventListener("click", () => { navigator.clipboard.writeText(a.username).catch(fail); menu.open = false; });
-  menu.append(el("div", { className: "pop" }, copy, remove));
+  const menu = el("div", { className: "menu right" }, edit, copy, remove);
+  menu.setAttribute("role", "menu");
+  const body = el("div", { className: "body" }, avatar(a), who, btn, el("div", { className: "menu-wrap" }, more, menu));
 
-  // Re-applies launch/preview/running state to this row.
+  // meta line: where it joins and its FPS cap
+  const game = el("span", { textContent: a.join.trim() ? "…" : "Roblox home" });
+  if (a.join.trim()) {
+    invoke("describe_join", { userId: id, text: a.join })
+      .then((label) => (game.textContent = label))
+      .catch((e) => { game.textContent = String(e); game.className = "bad"; });
+  }
+  const fps = el("span", { className: "num", textContent: a.fps_cap ? `FPS ${a.fps_cap}` : "FPS default" });
+  const meta = el("div", { className: "meta" }, game, el("span", { className: "sep", textContent: "·" }), fps);
+  const err = el("div", { className: "err" });
+
+  // Re-applies launch/preview/running state to this tile.
   const paint = () => {
-    const l = launch.get(id);
-    const busy = l && (l.state === "queued" || l.state === "launching");
     const isRunning = running.has(id);
-    let text = "Ready", cls = "badge";
-    if (needsSignIn) { text = "Needs sign-in"; cls += " bad"; }
-    else if (l?.state === "error") { text = "Error"; cls += " bad"; }
-    else if (l?.state === "queued") { text = "Queued"; cls += " busy"; }
-    else if (l?.state === "launching") { text = "Launching"; cls += " busy"; }
-    else if (isRunning) { text = "Running"; cls += " running"; }
-    else if (a.status === "unchecked") text = "Unchecked";
-    badge.className = cls;
-    badge.textContent = text;
-    errText.textContent = l?.state === "error" ? l.message || "" : "";
-    btn.dataset.act = busy || isRunning ? "stop" : "launch";
-    btn.textContent = btn.dataset.act === "stop" ? "Stop" : "Launch";
-    btn.hidden = needsSignIn;
+    const s = tileState(a, launch.get(id), isRunning);
+    pill.className = "pill " + s.tone;
+    pill.textContent = s.pill;
+    err.textContent = s.error ?? "";
+    err.hidden = !s.error;
+    btn.dataset.act = s.action;
+    btn.textContent = s.action === "stop" ? "Stop" : s.action === "signin" ? "Sign in again" : "Launch";
+    btn.className = "btn" + (s.action === "stop" ? "" : " primary");
     const p = previews.get(id);
-    const mini = isRunning && !!p?.minimized;
-    const image = isRunning && !mini && p?.image ? p.image : "";
-    thumb.hidden = !mini && !image;
-    label.hidden = !mini;
+    const image = isRunning && !p?.minimized && p?.image ? p.image : "";
     img.hidden = !image;
     if (image && img.getAttribute("src") !== image) img.src = image;
+    ph.hidden = !!image;
+    ph.textContent = isRunning ? (p?.minimized ? "Minimized" : "Starting…")
+      : s.pill === "Launching" ? "Launching…" : s.pill === "Queued" ? "Queued"
+      : a.status === "needs_sign_in" ? "Signed out" : "Not running";
+    shot.classList.toggle("busy", s.tone === "busy" || (isRunning && !image && !p?.minimized));
+    thumb.classList.toggle("live", isRunning);
+    thumb.setAttribute("aria-label", isRunning ? `Focus ${a.username}'s window` : `${a.username} is not running`);
   };
   cells.set(id, paint);
   paint();
 
-  const fps = el("label", { className: "muted", textContent: "FPS " }, fpsInput(a.fps_cap, (cap) => call("set_fps_cap", { userId: id, cap })));
-  const note = textInput("note", "Note", "Note", a.note, (v) => call("set_note", { userId: id, note: v }));
+  tile.append(shot, body, meta, err);
+  return tile;
+}
 
-  return el("div", { className: "row" }, check, av,
-    el("div", { className: "main" },
-      el("div", { className: "line" },
-        el("span", { className: "name", textContent: a.display_name }),
-        el("span", { className: "muted", textContent: "@" + a.username }),
-        badge, errText, signAgain, thumb),
-      el("div", { className: "line" }, join, joinLabel),
-      el("div", { className: "line" }, fps, note, btn, menu)));
+function addTile(i) {
+  const main = el("button", { className: "main", textContent: "Sign in another account" });
+  main.addEventListener("click", () => signIn(null));
+  const paste = el("button", { className: "link", textContent: "or paste a cookie" });
+  paste.addEventListener("click", openPaste);
+  const plus = el("div", { className: "big-plus" }, svg("M12 5v14M5 12h14"));
+  const t = el("div", { className: "tile add" }, plus, main, paste);
+  if (firstRender) { t.classList.add("enter"); t.style.setProperty("--i", i); }
+  return t;
+}
+
+function updateToolbar() {
+  const n = selected.size;
+  $("launch-sel").disabled = n === 0;
+  $("launch-sel").textContent = n ? `Launch ${n}` : "Launch";
+  $("launch-sel").title = n ? "" : "Tick accounts to launch them together";
+  const busy = [...launch.values()].some((l) => l.state === "queued" || l.state === "launching");
+  $("stop-all").hidden = running.size === 0 && !busy;
 }
 
 async function signIn(refreshUserId) {
@@ -177,31 +231,103 @@ async function signIn(refreshUserId) {
 // Stop / Stop all cancel queued and not-yet-started launches, which report nothing back.
 function unqueue(id) {
   const s = launch.get(id)?.state;
-  if (s === "queued" || s === "launching") { launch.delete(id); cells.get(id)?.(); }
+  if (s === "queued" || s === "launching") { launch.delete(id); cells.get(id)?.(); updateToolbar(); }
 }
 
-function launchSelected(target) {
+function launchSelected() {
   const userIds = [...selected];
-  if (!userIds.length) return toast("Tick at least one account first.");
-  call("launch", { userIds, target });
+  if (!userIds.length) return;
+  call("launch", { userIds, target: $("join-all").value.trim() || null });
 }
 
-// ---- tools ----
+// ---- edit sheet: holds its own copy of the values until Save ----
+let editing_acc = null;
+let describeTimer;
+function describeEditJoin() {
+  const text = $("edit-join").value;
+  const label = $("edit-join-label");
+  label.className = "help";
+  label.textContent = text.trim() ? "Checking…" : "Opens the Roblox home screen.";
+  clearTimeout(describeTimer);
+  if (!text.trim()) return;
+  describeTimer = setTimeout(async () => {
+    try { label.textContent = await invoke("describe_join", { userId: editing_acc.user_id, text }); }
+    catch (e) { label.textContent = String(e); label.className = "help bad"; }
+  }, 300);
+}
+function openEdit(a) {
+  editing_acc = a;
+  $("edit-title").textContent = `Edit ${a.display_name}`;
+  $("edit-join").value = a.join;
+  $("edit-fps").value = a.fps_cap ?? "";
+  $("edit-note").value = a.note;
+  describeEditJoin();
+  $("edit-dlg").returnValue = "";
+  $("edit-dlg").showModal();
+}
+$("edit-join").addEventListener("input", describeEditJoin);
+// Save only a Join that Dockie can read; otherwise shake the field and keep the sheet open.
+$("edit-save").addEventListener("click", async (e) => {
+  const text = $("edit-join").value.trim();
+  if (!text) return;
+  e.preventDefault();
+  try {
+    $("edit-join-label").textContent = await invoke("describe_join", { userId: editing_acc.user_id, text });
+    $("edit-join-label").className = "help";
+    $("edit-dlg").close("save");
+  } catch (err) {
+    $("edit-join-label").textContent = String(err);
+    $("edit-join-label").className = "help bad";
+    $("edit-join").animate([{ translate: "0" }, { translate: "-8px" }, { translate: "8px" }, { translate: "-5px" }, { translate: "5px" }, { translate: "-2px" }, { translate: "0" }], { duration: 360, easing: "ease-out" });
+    $("edit-join").focus();
+  }
+});
+$("edit-dlg").addEventListener("close", async () => {
+  const a = editing_acc;
+  if ($("edit-dlg").returnValue !== "save" || !a) return;
+  const id = a.user_id;
+  const join = $("edit-join").value.trim();
+  const fpsRaw = $("edit-fps").value;
+  const fps = fpsRaw === "" ? null : Number(fpsRaw);
+  const note = $("edit-note").value.trim();
+  if (join !== a.join) await call("set_join", { userId: id, join });
+  if (fps !== (a.fps_cap ?? null)) await call("set_fps_cap", { userId: id, cap: fps });
+  if (note !== a.note) await call("set_note", { userId: id, note });
+  refresh().catch(fail);
+});
+
+// ---- paste a cookie ----
+function openPaste() {
+  $("paste-dlg").returnValue = "";
+  $("paste-text").value = "";
+  $("paste-dlg").showModal();
+}
+$("paste-dlg").addEventListener("close", async () => {
+  const cookie = $("paste-text").value.trim();
+  $("paste-text").value = "";
+  if ($("paste-dlg").returnValue !== "ok" || !cookie) return;
+  try { await invoke("add_cookie", { cookie }); } catch (e) { fail(e); }
+  refresh().catch(fail);
+});
+
+// ---- windows ----
 async function renderWindows() {
   let list;
   try { list = await invoke("roblox_windows"); } catch (e) { return fail(e); }
   const names = new Map((snap?.accounts || []).map((a) => [a.user_id, a.username]));
   const rows = list.map((w) => {
-    const focusBtn = el("button", { textContent: "Focus" });
+    const focusBtn = el("button", { className: "btn sm", textContent: "Focus" });
     focusBtn.addEventListener("click", () => call("focus_pid", { pid: w.pid }));
-    const close = el("button", { textContent: "Close" });
+    const close = el("button", { className: "btn sm danger", textContent: "Close" });
     close.addEventListener("click", () => call("close_pid", { pid: w.pid }).then(renderWindows));
-    const who = w.user_id != null ? "@" + (names.get(w.user_id) ?? w.user_id) : "unknown account";
+    const who = w.user_id != null ? "@" + (names.get(w.user_id) ?? w.user_id) : "Not from Dockie";
     return el("div", { className: "win" },
-      el("span", { textContent: who }), el("span", { className: "muted", textContent: `PID ${w.pid}` }),
-      el("span", { className: "grow", textContent: w.title }), focusBtn, close);
+      el("div", {},
+        el("div", { className: "t", textContent: w.title || "Roblox" }),
+        el("div", { className: "s" }, who + " · ", el("span", { className: "num", textContent: `PID ${w.pid}` }))),
+      el("div", { className: "acts" }, focusBtn, close));
   });
-  $("windows").replaceChildren(...(rows.length ? rows : [el("p", { className: "muted", textContent: "No Roblox windows open." })]));
+  $("windows").replaceChildren(...(rows.length ? rows : [el("div", { className: "none", textContent: "No Roblox windows are open." })]));
 }
 
 async function closeAll() {
@@ -211,7 +337,7 @@ async function closeAll() {
   if (!(await ask("Close all Roblox windows?"))) return;
   await call("close_all_roblox");
   await refresh().catch(fail);
-  if (!$("tab-tools").hidden) renderWindows();
+  if (!$("tab-windows").hidden) renderWindows();
 }
 
 // ---- settings ----
@@ -228,37 +354,27 @@ function saveSettings() {
 for (const b of document.querySelectorAll("[role=tab]")) b.addEventListener("click", () => showTab(b.dataset.tab));
 $("warn-close").addEventListener("click", closeAll);
 $("close-all").addEventListener("click", closeAll);
-$("signin").addEventListener("click", () => signIn(null));
-$("join-go").addEventListener("click", () => {
-  const t = $("join-all").value.trim();
-  t ? launchSelected(t) : toast("Enter a link, id or @user first.");
-});
-$("launch-sel").addEventListener("click", () => launchSelected(null));
+for (const id of ["signin", "empty-signin"]) $(id).addEventListener("click", () => signIn(null));
+for (const id of ["paste", "empty-paste"]) $(id).addEventListener("click", openPaste);
+$("launch-sel").addEventListener("click", launchSelected);
+$("join-all").addEventListener("keydown", (e) => { if (e.key === "Enter") launchSelected(); });
 $("stop-all").addEventListener("click", async () => {
   await call("stop_all");
   for (const id of [...launch.keys()]) unqueue(id);
 });
 $("import").addEventListener("click", async () => {
   const r = await call("import_accounts");
-  if (r) toast(`Imported ${r[0]} new, ${r[1]} replaced.`);
+  if (r && r[0] + r[1] > 0) toast(`Imported ${r[0]} new, ${r[1]} replaced.`);
   refresh().catch(fail);
 });
 $("export").addEventListener("click", () => call("export_accounts", { userIds: [...selected] }));
-$("paste").addEventListener("click", () => { $("paste-dlg").returnValue = ""; $("paste-text").value = ""; $("paste-dlg").showModal(); });
-$("paste-dlg").addEventListener("close", async () => {
-  const cookie = $("paste-text").value.trim();
-  $("paste-text").value = "";
-  if ($("paste-dlg").returnValue !== "ok" || !cookie) return;
-  try { await invoke("add_cookie", { cookie }); } catch (e) { fail(e); }
-  refresh().catch(fail);
-});
 $("set-fps").addEventListener("blur", saveSettings);
 $("set-trim").addEventListener("change", saveSettings);
 $("open-data").addEventListener("click", () => call("open_data_folder"));
 
 listen("accounts-changed", () => refresh().catch(fail));
 document.addEventListener("focusout", () => setTimeout(() => stale && !editing() && refresh().catch(fail)));
-listen("launch-status", ({ payload: p }) => { launch.set(p.user_id, p); cells.get(p.user_id)?.(); });
+listen("launch-status", ({ payload: p }) => { launch.set(p.user_id, p); cells.get(p.user_id)?.(); updateToolbar(); });
 listen("preview", ({ payload: p }) => { previews.set(p.user_id, p); cells.get(p.user_id)?.(); });
 listen("running", ({ payload: p }) => {
   running.clear();
@@ -268,6 +384,7 @@ listen("running", ({ payload: p }) => {
     if (l.state === "error" && running.has(id)) launch.delete(id); // its window showed up after all
   }
   for (const paint of cells.values()) paint();
+  updateToolbar();
 });
 listen("notice", ({ payload: p }) => toast(p.message));
 listen("confirm-quit", async () => {

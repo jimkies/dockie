@@ -14,7 +14,9 @@
         "height": 760,
         "resizable": true,
         "fullscreen": false,
-        "label": "main"
+        "label": "main",
+        "minWidth": 760,
+        "minHeight": 520
       }
     ],
     "security": {
