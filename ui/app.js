@@ -57,6 +57,20 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
 
+// ---- window frame: Windows' title bar is off, so these buttons stand in for it ----
+const appWindow = window.__TAURI__.window.getCurrentWindow();
+async function syncMax() {
+  const max = await appWindow.isMaximized();
+  document.documentElement.classList.toggle("max", max); // square corners when maximized
+  $("win-max").setAttribute("aria-label", max ? "Restore" : "Maximize");
+  $("win-max").title = max ? "Restore" : "Maximize";
+}
+$("win-min").addEventListener("click", () => appWindow.minimize());
+$("win-max").addEventListener("click", () => appWindow.toggleMaximize());
+$("win-close").addEventListener("click", () => appWindow.close()); // the backend still asks before quitting with Roblox open
+appWindow.onResized(() => syncMax().catch(() => {}));
+syncMax().catch(() => {});
+
 // ---- shell ----
 function showTab(name) {
   for (const b of document.querySelectorAll("[role=tab]")) b.setAttribute("aria-selected", b.dataset.tab === name);

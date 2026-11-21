@@ -22,14 +22,29 @@
   --ease-drawer: cubic-bezier(.32, .72, 0, 1);
   --tile-r: 16px;
   --tile-pad: 6px;
+  --win-r: 14px;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; }
+/* The window itself is see-through; the body is the rounded window. Maximized, it fills the screen square. */
+html { background: transparent; }
 body {
   margin: 0; display: flex; flex-direction: column; background: var(--page); color: var(--text);
   font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+  border-radius: var(--win-r); border: 1px solid var(--line-2); overflow: hidden;
+  user-select: none; cursor: default; /* an app, not a page */
 }
+html.max body { border-radius: 0; border: 0; }
+input, textarea { user-select: text; }
+
+/* Slim scrollbar in Dockie's colours, kept clear of the rounded corners. */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-track { margin: 6px; }
+::-webkit-scrollbar-thumb { background: rgb(255 255 255 / .12); border: 3px solid transparent; border-radius: 99px; background-clip: padding-box; min-height: 40px; }
+::-webkit-scrollbar-thumb:hover { background-color: rgb(255 255 255 / .22); }
+::-webkit-scrollbar-thumb:active { background-color: rgb(255 255 255 / .3); }
 h1, h2 { text-wrap: balance; margin: 0; }
 h2 { font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
 .num { font-variant-numeric: tabular-nums; }
@@ -68,7 +83,22 @@ textarea.field { height: auto; padding: 9px 11px; width: 100%; resize: vertical;
 .grow { flex: 1; }
 
 /* ---- shell ---- */
-.top { display: flex; align-items: center; gap: 16px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.top { display: flex; align-items: center; gap: 16px; padding: 9px 9px 9px 18px; border-bottom: 1px solid var(--line); }
+.drag { flex: 1; align-self: stretch; }
+.winctl { display: flex; gap: 2px; }
+.winctl button {
+  width: 38px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted); cursor: pointer;
+  transition: background-color 150ms ease-out, color 150ms ease-out, scale 150ms ease-out;
+}
+.winctl button:hover { background: var(--hover); color: var(--text); }
+.winctl button:active { scale: .96; }
+.winctl .close:hover { background: oklch(58% .2 25); color: white; }
+.winctl svg { width: 14px; height: 14px; stroke-width: 1.7; grid-area: 1 / 1; }
+/* maximize <-> restore: one shape morphing, so crossfade with blur */
+#win-max svg { transition: opacity 200ms var(--ease-out), filter 200ms var(--ease-out), scale 200ms var(--ease-out); }
+#win-max .i-restore, .max #win-max .i-max { opacity: 0; filter: blur(3px); scale: .7; }
+.max #win-max .i-restore { opacity: 1; filter: none; scale: 1; }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 650; font-size: 15px; letter-spacing: -.01em; }
 .mark { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(in oklch 135deg, oklch(72% .19 285), oklch(72% .15 200)); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .18); }
 .mark.big { width: 48px; height: 48px; border-radius: 14px; }
@@ -205,7 +235,8 @@ dialog.sheet {
   background: var(--pop); color: var(--text); box-shadow: var(--shadow);
 }
 dialog.sheet[open] { animation: pop 200ms var(--ease-drawer); }
-dialog.sheet::backdrop { background: rgb(0 0 0 / .55); animation: fade 200ms ease-out; }
+dialog.sheet::backdrop { background: rgb(0 0 0 / .55); animation: fade 200ms ease-out; border-radius: 14px; } /* = --win-r */
+.max dialog.sheet::backdrop { border-radius: 0; }
 @keyframes pop { from { opacity: 0; scale: .97; } }
 @keyframes fade { from { opacity: 0; } }
 .sheet form { display: grid; gap: 14px; }
