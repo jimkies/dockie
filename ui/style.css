@@ -43,7 +43,7 @@ main { padding: 12px 14px; }
 .thumb { padding: 0; border: 0; background: none; flex: none; }
 .minimized { width: 120px; height: 68px; display: grid; place-items: center; border-radius: 4px; background: var(--bg); color: var(--muted); font-size: 12px; cursor: pointer; }
 .join { width: 260px; }
-.fps { width: 70px; }
+.fps { width: 90px; }
 .note { width: 170px; }
 
 details.menu { position: relative; }

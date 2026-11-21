@@ -118,7 +118,8 @@ impl Api {
   }
 
   pub async fn auth_ticket(&self, cookie: &str) -> Result<String, ApiError> {
-    let resp = self.post("https://auth.roblox.com/v1/authentication-ticket/", cookie, None).await?;
+    // Roblox answers 415 without a JSON body.
+    let resp = self.post("https://auth.roblox.com/v1/authentication-ticket/", cookie, Some(&json!({}))).await?;
     resp
       .headers()
       .get("rbx-authentication-ticket")

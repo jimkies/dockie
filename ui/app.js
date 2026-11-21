@@ -1,5 +1,7 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
+// window.confirm() silently returns true in Tauri's webview, so use the native dialog.
+const ask = (msg) => window.__TAURI__.dialog.ask(msg, { title: "Dockie", kind: "warning" });
 const $ = (id) => document.getElementById(id);
 
 let snap = null;
@@ -112,9 +114,9 @@ function renderRow(a) {
   summary.setAttribute("aria-label", "More actions for " + a.username);
   const menu = el("details", { className: "menu" }, summary);
   const remove = el("button", { textContent: "Remove" });
-  remove.addEventListener("click", () => {
+  remove.addEventListener("click", async () => {
     menu.open = false;
-    if (confirm(`Remove ${a.username}?`)) call("remove_account", { userId: id }).then(() => refresh().catch(fail));
+    if (await ask(`Remove ${a.username}?`)) call("remove_account", { userId: id }).then(() => refresh().catch(fail));
   });
   const copy = el("button", { textContent: "Copy username" });
   copy.addEventListener("click", () => { navigator.clipboard.writeText(a.username).catch(fail); menu.open = false; });
@@ -206,7 +208,7 @@ async function closeAll() {
   // check processes, not windows: a windowless Roblox still holds the multi-instance lock
   snap = (await call("get_snapshot")) ?? snap;
   if (!snap?.roblox_running) return toast("No Roblox windows are open.");
-  if (!confirm("Close all Roblox windows?")) return;
+  if (!(await ask("Close all Roblox windows?"))) return;
   await call("close_all_roblox");
   await refresh().catch(fail);
   if (!$("tab-tools").hidden) renderWindows();
@@ -268,8 +270,8 @@ listen("running", ({ payload: p }) => {
   for (const paint of cells.values()) paint();
 });
 listen("notice", ({ payload: p }) => toast(p.message));
-listen("confirm-quit", () => {
-  if (confirm("Roblox windows stay open, but no new extra windows can open until you reopen Dockie. Quit?")) invoke("quit");
+listen("confirm-quit", async () => {
+  if (await ask("Roblox windows stay open, but no new extra windows can open until you reopen Dockie. Quit?")) invoke("quit");
 });
 
 window.__TAURI__.app?.getVersion?.().then((v) => ($("version").textContent = "Dockie " + v)).catch(() => {});
