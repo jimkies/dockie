@@ -172,6 +172,11 @@ pub async fn describe_join(app: AppHandle, user_id: u64, text: String) -> Res<St
   Ok(l)
 }
 
+#[tauri::command]
+pub async fn search_games(app: AppHandle, query: String) -> Res<Vec<crate::roblox_api::GameHit>> {
+  app.state::<AppCtx>().api.search_games(&query).await.map_err(e)
+}
+
 /// Focus for any listed Roblox window, Dockie's or not.
 #[tauri::command]
 pub fn focus_pid(pid: u32) -> Res<()> {

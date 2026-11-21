@@ -30,7 +30,7 @@ function svg(d) {
 function toast(message) {
   const t = el("div", { className: "toast", textContent: message });
   $("toasts").append(t);
-  setTimeout(() => t.remove(), 5000);
+  setTimeout(() => t.animate([{}, { opacity: 0, translate: "0 4px" }], { duration: 150, easing: "ease-out" }).finished.then(() => t.remove()), 5000);
 }
 const fail = (e) => toast(String(e));
 const call = (cmd, args) => invoke(cmd, args).catch(fail);
@@ -49,13 +49,48 @@ document.addEventListener("click", (e) => {
     const menu = trigger.nextElementSibling;
     const open = !menu.classList.contains("open");
     closeMenus(menu);
+    if (open) {
+      // open upward when there's no room below (bottom row of tiles)
+      menu.classList.remove("up");
+      const floor = (menu.closest("main") ?? document.body).getBoundingClientRect().bottom;
+      menu.classList.toggle("up", menu.getBoundingClientRect().bottom > floor - 8);
+    }
     menu.classList.toggle("open", open);
     trigger.setAttribute("aria-expanded", String(open));
+    if (open && e.detail === 0) menu.querySelector("[role=menuitem]")?.focus(); // opened from the keyboard
     return;
   }
   closeMenus(); // any other click, including a menu item, closes menus
 });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+document.addEventListener("keydown", (e) => {
+  const menu = document.activeElement?.closest(".menu.open");
+  if (e.key === "Escape") {
+    menu?.previousElementSibling.focus(); // back to the button that opened it
+    return closeMenus();
+  }
+  if (!menu) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const items = [...menu.querySelectorAll("[role=menuitem]")];
+    const i = items.indexOf(document.activeElement) + (e.key === "ArrowDown" ? 1 : -1);
+    items[(i + items.length) % items.length].focus();
+  } else if (e.key === "Tab") closeMenus();
+});
+const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---- window frame: Windows' title bar is off, so these buttons stand in for it ----
+const appWindow = window.__TAURI__.window.getCurrentWindow();
+async function syncMax() {
+  const max = await appWindow.isMaximized();
+  document.documentElement.classList.toggle("max", max); // square corners when maximized
+  $("win-max").setAttribute("aria-label", max ? "Restore" : "Maximize");
+  $("win-max").title = max ? "Restore" : "Maximize";
+}
+$("win-min").addEventListener("click", () => appWindow.minimize());
+$("win-max").addEventListener("click", () => appWindow.toggleMaximize());
+$("win-close").addEventListener("click", () => appWindow.close()); // the backend still asks before quitting with Roblox open
+appWindow.onResized(() => syncMax().catch(() => {}));
+syncMax().catch(() => {});
 
 // ---- shell ----
 function showTab(name) {
@@ -196,6 +231,10 @@ function renderTile(a, i) {
   paint();
 
   tile.append(shot, body, meta, err);
+  // Clicking the card ticks it. Its buttons, checkbox and menu keep their own jobs; a running preview focuses its window.
+  tile.addEventListener("click", (e) => {
+    if (!e.target.closest("button:not(:disabled), input, label, .menu-wrap")) check.click();
+  });
   return tile;
 }
 
@@ -237,11 +276,113 @@ function unqueue(id) {
 
 function launchSelected() {
   const userIds = [...selected];
-  if (!userIds.length) return;
-  call("launch", { userIds, target: $("join-all").value.trim() || null });
+  if (!userIds.length) return toast("Tick the accounts you want to launch first.");
+  const target = $("join-all").value.trim() || null;
+  if (target && searchPlan(target) && !searchPlan(target).follow) return toast(PICK_HINT); // words, not a link: pick a game first
+  call("launch", { userIds, target });
 }
 
+// ---- Join boxes: words search Roblox games; a × clears the box ----
+const GAMEPAD = "M6 11h4M8 9v4M15 12h.01M18 10h.01M17.3 5H6.7a4 4 0 0 0-4 3.6l-.7 6.4A2.5 2.5 0 0 0 4.5 18c.9 0 1.6-.5 2.1-1.2L8 15h8l1.4 1.8c.5.7 1.2 1.2 2.1 1.2a2.5 2.5 0 0 0 2.5-3l-.7-6.4a4 4 0 0 0-4-3.6Z";
+const PERSON = "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM5 20a7 7 0 0 1 14 0";
+function combo(input) {
+  const list = $(input.getAttribute("aria-controls"));
+  const clear = input.parentElement.querySelector(".clear");
+  let timer, seq = 0, active = -1, rows = [], games = [];
+  const close = () => {
+    clearTimeout(timer);
+    seq++; // a reply still on its way must not reopen the list
+    rows = []; games = []; active = -1;
+    list.hidden = true;
+    list.removeAttribute("aria-busy");
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+  };
+  const show = (kids) => {
+    list.replaceChildren(...kids);
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  };
+  const status = (text) => el("div", { className: "status", textContent: text });
+  const setActive = (n) => {
+    active = n;
+    rows.forEach((r, k) => r.el.setAttribute("aria-selected", String(k === n)));
+    if (n < 0) return input.removeAttribute("aria-activedescendant");
+    input.setAttribute("aria-activedescendant", rows[n].el.id);
+    rows[n].el.scrollIntoView({ block: "nearest" });
+  };
+  const pick = (value) => {
+    input.value = value;
+    close();
+    input.dispatchEvent(new Event("input", { bubbles: true })); // a link or @user never searches, so the list stays shut
+    input.focus();
+  };
+  const row = (n, icon, title, sub, value) => {
+    const o = el("div", { id: `${list.id}-${n}`, className: n === "f" ? "opt" : "opt game" }, icon,
+      el("div", { className: "txt" }, el("div", { className: "t", textContent: title }), el("div", { className: "s num", textContent: sub })));
+    o.setAttribute("role", "option");
+    o.setAttribute("aria-selected", "false");
+    o.addEventListener("click", () => pick(value));
+    return { el: o, value };
+  };
+  const glyph = (d, round) => el("div", { className: "ic" + (round ? " round" : "") }, svg(d));
+  const sync = () => { clear.hidden = !input.value; close(); };
+
+  list.addEventListener("mousedown", (e) => e.preventDefault()); // clicking a row or the scrollbar keeps focus in the box
+  input.addEventListener("blur", close);
+  clear.addEventListener("click", () => {
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.focus();
+  });
+  input.addEventListener("input", () => {
+    clear.hidden = !input.value;
+    const plan = searchPlan(input.value);
+    if (!plan) return close();
+    clearTimeout(timer);
+    const mine = ++seq; // any reply still on its way is now stale
+    const follow = plan.follow ? [row("f", glyph(PERSON, true), `Follow @${plan.follow}`, "Join whatever they're playing", "@" + plan.follow)] : [];
+    rows = [...follow, ...games]; // the last results stay up, dimmed, so the list doesn't collapse on every key
+    setActive(-1);
+    list.setAttribute("aria-busy", "true");
+    show([...rows.map((r) => r.el), ...(games.length ? [] : [status("Searching…")])]);
+    timer = setTimeout(async () => {
+      let hits = [], failed = false;
+      try { hits = await invoke("search_games", { query: plan.query }); } catch { failed = true; }
+      if (mine !== seq) return; // the box changed, was cleared, picked or closed meanwhile
+      games = hits.map((h, k) => row("g" + k,
+        h.icon ? el("img", { className: "ic", alt: "", src: h.icon }) : glyph(GAMEPAD),
+        h.name, `${h.players.toLocaleString()} playing`, h.url));
+      rows = [...follow, ...games];
+      list.removeAttribute("aria-busy");
+      const note = failed ? "Couldn't search Roblox right now" : games.length ? null : "No games found";
+      show([...rows.map((r) => r.el), ...(note ? [status(note)] : [])]);
+      setActive(Math.min(active, rows.length - 1));
+    }, 250);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (list.hidden) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const n = rows.length + 1; // the rows, plus "nothing highlighted"
+      if (n > 1) setActive(((active + 1 + (e.key === "ArrowDown" ? 1 : -1) + n) % n) - 1);
+    } else if (e.key === "Enter" && active >= 0) {
+      e.preventDefault(); // not Save, not Launch: Enter picks the highlighted row
+      e.stopImmediatePropagation();
+      pick(rows[active].value);
+    } else if (e.key === "Escape") {
+      e.preventDefault(); // closes the list, not the Edit sheet
+      e.stopPropagation();
+      close();
+    }
+  });
+  return { sync };
+}
+combo($("join-all"));
+const editCombo = combo($("edit-join"));
+
 // ---- edit sheet: holds its own copy of the values until Save ----
+const PICK_HINT = "Pick a game from the list, or paste a link.";
 let editing_acc = null;
 let describeTimer;
 function describeEditJoin() {
@@ -251,9 +392,13 @@ function describeEditJoin() {
   label.textContent = text.trim() ? "Checking…" : "Opens the Roblox home screen.";
   clearTimeout(describeTimer);
   if (!text.trim()) return;
+  if (searchPlan(text) && !searchPlan(text).follow) return void (label.textContent = PICK_HINT); // words: a search, not a broken link
   describeTimer = setTimeout(async () => {
-    try { label.textContent = await invoke("describe_join", { userId: editing_acc.user_id, text }); }
-    catch (e) { label.textContent = String(e); label.className = "help bad"; }
+    let l, bad = false;
+    try { l = await invoke("describe_join", { userId: editing_acc.user_id, text }); } catch (e) { l = String(e); bad = true; }
+    if ($("edit-join").value !== text) return; // a slow answer for text that's since changed
+    label.textContent = l;
+    label.className = bad ? "help bad" : "help";
   }, 300);
 }
 function openEdit(a) {
@@ -262,6 +407,7 @@ function openEdit(a) {
   $("edit-join").value = a.join;
   $("edit-fps").value = a.fps_cap ?? "";
   $("edit-note").value = a.note;
+  editCombo.sync();
   describeEditJoin();
   $("edit-dlg").showModal();
 }
@@ -282,9 +428,9 @@ $("edit-save").addEventListener("click", async (e) => {
     try {
       await invoke("set_join", { userId: id, join });
     } catch (err) {
-      $("edit-join-label").textContent = String(err);
+      $("edit-join-label").textContent = searchPlan(join) && !searchPlan(join).follow ? PICK_HINT : String(err);
       $("edit-join-label").className = "help bad";
-      $("edit-join").animate([{ translate: "0" }, { translate: "-8px" }, { translate: "8px" }, { translate: "-5px" }, { translate: "5px" }, { translate: "-2px" }, { translate: "0" }], { duration: 360, easing: "ease-out" });
+      if (!reduceMotion()) $("edit-join").animate([{ translate: "0" }, { translate: "-8px" }, { translate: "8px" }, { translate: "-5px" }, { translate: "5px" }, { translate: "-2px" }, { translate: "0" }], { duration: 360, easing: "ease-out" });
       $("edit-join").focus();
       return;
     }
