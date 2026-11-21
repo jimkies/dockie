@@ -30,15 +30,20 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; }
-/* The window itself is see-through; the body is the rounded window. Maximized, it fills the screen square. */
+/* The window itself is see-through and .app is the rounded window inside it. The frame can't live on
+   <body>: with a transparent <html>, CSS spreads the body's background over the whole window and moves
+   its overflow clipping up to the window too, so the corners would stay square. */
 html { background: transparent; }
 body {
-  margin: 0; display: flex; flex-direction: column; background: var(--page); color: var(--text);
+  margin: 0; color: var(--text);
   font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased;
-  border-radius: var(--win-r); border: 1px solid var(--line-2); overflow: hidden;
   user-select: none; cursor: default; /* an app, not a page */
 }
-html.max body { border-radius: 0; border: 0; }
+.app {
+  height: 100%; display: flex; flex-direction: column; background: var(--page);
+  border-radius: var(--win-r); border: 1px solid var(--line-2); overflow: hidden;
+}
+html.max .app { border-radius: 0; border: 0; }
 input, textarea { user-select: text; }
 
 /* Slim scrollbar in Dockie's colours, kept clear of the rounded corners. */

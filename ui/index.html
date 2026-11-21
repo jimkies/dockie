@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="app">
 <!-- Dockie draws its own title bar: empty parts of it drag the window, double-click maximizes. -->
 <header class="top" data-tauri-drag-region>
   <div class="brand" data-tauri-drag-region><svg class="mark" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4.5" width="6.5" height="11" rx="1.5"/><rect x="11" y="4.5" width="6.5" height="11" rx="1.5"/></svg>Dockie</div>
@@ -127,6 +128,7 @@
 </main>
 
 <div id="toasts" aria-live="polite"></div>
+</div>
 
 <dialog id="paste-dlg" class="sheet">
   <form method="dialog">
