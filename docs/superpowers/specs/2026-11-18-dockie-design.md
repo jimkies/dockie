@@ -213,7 +213,22 @@ Needs sign-in · Roblox isn't installed · Couldn't get a launch ticket (with Ro
 
 ## Open issues
 
-**Unverified (testing decides; may change the design)**
+**Live test results (2026-11-21, Roblox 0.748, two real accounts)**
+
+- **#1 multi-instance:** works with `ROBLOX_singletonMutex` + `ROBLOX_singletonEvent`. Two accounts ran side by side.
+- **#2 PlaceLauncher host:** `assetgame.roblox.com` works. Joining by place id and following a user both launched into the game.
+- **#3 window ownership:** the spawned pid owns the window. Process start times read fine (no 0s).
+- **#4 FPS values:** Roblox writes `-1` for Unlimited. An override of 60 was written before launch, restored to the user's `-1` about 4.5 s later, and restored again when the window closed normally (Roblox writes its cap on exit). The value set beyond 60 / -1 is still untested, so the number box stays.
+- **#5 previews:** PrintWindow captures the real Roblox UI, not black. "minimized" shows for minimized windows.
+- **#6 titles:** `Roblox · <username>` stays set, with no visible flicker.
+- **#7 imported accounts:** an export imported into an empty data folder on the same PC checks as valid. A different PC or network is still untested.
+- **#9 freeing RAM:** allowed by Roblox. Minimized windows went from about 1.6 GB to about 0.3 GB, and grew back about 150 MB per minute.
+- **Bugs found and fixed:**
+  - The launch-ticket POST needed a JSON body (Roblox returned 415).
+  - `window.confirm()` silently returns true in Tauri's webview, so Remove, Close all and the quit prompt skipped confirmation. They now use the dialog plugin's native `ask`.
+- **Still untested:** private-server links (no link was available), share links, and a Roblox self-update during launch.
+
+**Unverified before the live test (kept for history)**
 
 1. **Multi-instance lock:** it's unclear whether `ROBLOX_singletonMutex` alone still works or the `ROBLOX_singletonEvent` is also needed. Any Roblox update can break this, and Dockie's core feature is down until it's fixed.
 2. **PlaceLauncher host:** `assetgame.roblox.com` is an old Roblox address. It may need to be `www.roblox.com/Game/PlaceLauncher.ashx` instead.
