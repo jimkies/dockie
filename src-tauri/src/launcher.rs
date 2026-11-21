@@ -37,6 +37,9 @@ pub struct RobloxWindow {
   pub pid: u32,
   pub title: String,
   pub user_id: Option<u64>,
+  pub mem_bytes: Option<u64>,
+  pub uptime_s: u64,
+  pub minimized: bool,
 }
 
 fn emit(app: &AppHandle, user_id: u64, state: &'static str, message: Option<String>) {
@@ -241,12 +244,20 @@ pub fn stop(ctx: &AppCtx, user_id: Option<u64>) {
 pub fn windows(ctx: &AppCtx) -> Vec<RobloxWindow> {
   let all = roblox_processes();
   let state = ctx.state.lock().unwrap();
+  let now = procs::filetime_now();
   all
     .iter()
     .filter_map(|p| {
       let (pid, hwnd) = main_window(&[p.pid])?;
       let user_id = state.launched.iter().find(|l| l.pid == pid && is_alive(l, &all)).map(|l| l.user_id);
-      Some(RobloxWindow { pid, title: procs::title(hwnd), user_id })
+      Some(RobloxWindow {
+        pid,
+        title: procs::title(hwnd),
+        user_id,
+        mem_bytes: procs::working_set(pid),
+        uptime_s: procs::uptime_secs(p.created, now),
+        minimized: procs::is_minimized(hwnd),
+      })
     })
     .collect()
 }

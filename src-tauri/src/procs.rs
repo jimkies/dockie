@@ -5,7 +5,7 @@ use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS
 use windows::Win32::System::Diagnostics::ToolHelp::{
   CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
-use windows::Win32::System::ProcessStatus::K32EmptyWorkingSet;
+use windows::Win32::System::ProcessStatus::{K32EmptyWorkingSet, K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows::Win32::System::Registry::{RegGetValueW, HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
 use windows::Win32::System::Threading::{
   CreateEventW, CreateMutexW, GetProcessTimes, OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -175,6 +175,28 @@ pub fn kill(pid: u32) -> Result<()> {
   }
 }
 
+/// RAM the process is using right now (its working set), in bytes. None when Windows won't say.
+pub fn working_set(pid: u32) -> Option<u64> {
+  unsafe {
+    // limited access is all this needs, and is what Roblox allows
+    let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+    let mut c = PROCESS_MEMORY_COUNTERS::default();
+    let ok = K32GetProcessMemoryInfo(h, &mut c, std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32).as_bool();
+    let _ = CloseHandle(h);
+    ok.then_some(c.WorkingSetSize as u64)
+  }
+}
+
+/// Now, in FILETIME units (100 ns since 1601), to compare with `ProcInfo::created`.
+pub fn filetime_now() -> u64 {
+  let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+  (unix.as_nanos() / 100) as u64 + 116_444_736_000_000_000
+}
+
+pub fn uptime_secs(created: u64, now: u64) -> u64 {
+  now.saturating_sub(created) / 10_000_000
+}
+
 pub fn trim(pid: u32) -> Result<()> {
   unsafe {
     let h = OpenProcess(PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION, false, pid)?;
@@ -221,6 +243,19 @@ mod tests {
   use super::*;
 
   fn p(pid: u32, parent: u32) -> ProcInfo { ProcInfo { pid, parent, created: 0 } }
+
+  #[test]
+  fn uptime_counts_whole_seconds() {
+    let c = 133_000_000_000_000_000u64;
+    assert_eq!(uptime_secs(c, c + 90 * 10_000_000 + 9_999_999), 90);
+    assert_eq!(uptime_secs(c + 5, c), 0); // clock skew never underflows
+  }
+
+  #[test]
+  fn reads_own_working_set() {
+    assert!(working_set(std::process::id()).unwrap() > 0);
+    assert!(filetime_now() > 133_000_000_000_000_000); // after 2022
+  }
 
   #[test]
   fn descendants_includes_children_of_dead_parent() {

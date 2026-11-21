@@ -39,3 +39,15 @@ console.log("search ok");
 // A Roblox link is a link whatever its case (parse_join lowercases the host)
 assert.equal(searchPlan("WWW.ROBLOX.COM?placeId=920587237"), null);
 console.log("case ok");
+
+// Windows tab numbers and tab direction
+const { fmtBytes, fmtUptime, tabStep } = require("./state.js");
+assert.equal(fmtBytes(812 * 2 ** 20), "812 MB");
+assert.equal(fmtBytes(1.25 * 2 ** 30), "1.3 GB");
+assert.equal(fmtUptime(45), "45s");
+assert.equal(fmtUptime(12 * 60 + 5), "12m");
+assert.equal(fmtUptime(2 * 3600 + 14 * 60), "2h 14m");
+assert.equal(tabStep("accounts", "settings"), 1);
+assert.equal(tabStep("settings", "windows"), -1);
+assert.equal(tabStep("windows", "windows"), 0);
+console.log("format ok");
