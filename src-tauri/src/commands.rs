@@ -71,6 +71,7 @@ pub fn set_note(app: AppHandle, user_id: u64, note: String) -> Res<()> {
 
 #[tauri::command]
 pub fn set_join(app: AppHandle, user_id: u64, join: String) -> Res<()> {
+  join::parse_join(&join)?; // only save a Join that launch can use
   edit(&app, user_id, |a| a.join = join)
 }
 

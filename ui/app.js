@@ -189,6 +189,7 @@ function renderTile(a, i) {
       : a.status === "needs_sign_in" ? "Signed out" : "Not running";
     shot.classList.toggle("busy", s.tone === "busy" || (isRunning && !image && !p?.minimized));
     thumb.classList.toggle("live", isRunning);
+    thumb.disabled = !isRunning; // nothing to focus, so no tab stop
     thumb.setAttribute("aria-label", isRunning ? `Focus ${a.username}'s window` : `${a.username} is not running`);
   };
   cells.set(id, paint);
@@ -262,35 +263,33 @@ function openEdit(a) {
   $("edit-fps").value = a.fps_cap ?? "";
   $("edit-note").value = a.note;
   describeEditJoin();
-  $("edit-dlg").returnValue = "";
   $("edit-dlg").showModal();
 }
 $("edit-join").addEventListener("input", describeEditJoin);
-// Save only a Join that Dockie can read; otherwise shake the field and keep the sheet open.
+$("edit-cancel").addEventListener("click", () => $("edit-dlg").close());
+// Saves only the changed fields. set_join rejects a Join Dockie can't read: shake the field and keep the sheet open.
+// Save is the form's default button, so Enter in any field lands here too.
 $("edit-save").addEventListener("click", async (e) => {
-  const text = $("edit-join").value.trim();
-  if (!text) return;
   e.preventDefault();
-  try {
-    $("edit-join-label").textContent = await invoke("describe_join", { userId: editing_acc.user_id, text });
-    $("edit-join-label").className = "help";
-    $("edit-dlg").close("save");
-  } catch (err) {
-    $("edit-join-label").textContent = String(err);
-    $("edit-join-label").className = "help bad";
-    $("edit-join").animate([{ translate: "0" }, { translate: "-8px" }, { translate: "8px" }, { translate: "-5px" }, { translate: "5px" }, { translate: "-2px" }, { translate: "0" }], { duration: 360, easing: "ease-out" });
-    $("edit-join").focus();
-  }
-});
-$("edit-dlg").addEventListener("close", async () => {
+  if (!e.target.form.reportValidity()) return;
   const a = editing_acc;
-  if ($("edit-dlg").returnValue !== "save" || !a) return;
   const id = a.user_id;
   const join = $("edit-join").value.trim();
   const fpsRaw = $("edit-fps").value;
   const fps = fpsRaw === "" ? null : Number(fpsRaw);
   const note = $("edit-note").value.trim();
-  if (join !== a.join) await call("set_join", { userId: id, join });
+  if (join !== a.join) {
+    try {
+      await invoke("set_join", { userId: id, join });
+    } catch (err) {
+      $("edit-join-label").textContent = String(err);
+      $("edit-join-label").className = "help bad";
+      $("edit-join").animate([{ translate: "0" }, { translate: "-8px" }, { translate: "8px" }, { translate: "-5px" }, { translate: "5px" }, { translate: "-2px" }, { translate: "0" }], { duration: 360, easing: "ease-out" });
+      $("edit-join").focus();
+      return;
+    }
+  }
+  $("edit-dlg").close();
   if (fps !== (a.fps_cap ?? null)) await call("set_fps_cap", { userId: id, cap: fps });
   if (note !== a.note) await call("set_note", { userId: id, note });
   refresh().catch(fail);
@@ -362,7 +361,7 @@ $("stop-all").addEventListener("click", async () => {
   await call("stop_all");
   for (const id of [...launch.keys()]) unqueue(id);
 });
-$("import").addEventListener("click", async () => {
+for (const id of ["import", "empty-import"]) $(id).addEventListener("click", async () => {
   const r = await call("import_accounts");
   if (r && r[0] + r[1] > 0) toast(`Imported ${r[0]} new, ${r[1]} replaced.`);
   refresh().catch(fail);
