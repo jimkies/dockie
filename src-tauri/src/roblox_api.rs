@@ -3,6 +3,7 @@ use reqwest::{Client, Method, RequestBuilder, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::OnceLock;
+use std::time::Duration;
 
 #[derive(Debug)]
 pub enum ApiError {
@@ -57,6 +58,11 @@ pub struct GameHit {
   /// What a pick puts in the Join box; parse_join reads it as the game.
   pub url: String,
   pub icon: Option<String>,
+}
+
+/// Gives up on a call that hangs (Wi-Fi without internet, a dropped connection) instead of waiting forever.
+async fn within<T>(limit: std::time::Duration, f: impl Future<Output = Result<T, ApiError>>) -> Result<T, ApiError> {
+  tokio::time::timeout(limit, f).await.unwrap_or_else(|_| Err(ApiError::Other("Roblox took too long to answer".into())))
 }
 
 /// Games from an omni-search reply, at most eight, skipping entries Dockie can't join.
@@ -221,7 +227,7 @@ impl Api {
     });
     let q: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
     let url = format!("https://apis.roblox.com/search-api/omni-search?searchQuery={q}&sessionId={session}&pageType=all");
-    let mut hits = parse_game_search(&self.get_json(&url, None).await?);
+    let mut hits = parse_game_search(&within(Duration::from_secs(8), self.get_json(&url, None)).await?);
     if hits.is_empty() {
       return Ok(hits);
     }
@@ -231,7 +237,7 @@ impl Api {
       ids.join(",")
     );
     // Icons are decoration: if this call fails, show the games without them.
-    if let Ok(icons) = self.get_json(&url, None).await {
+    if let Ok(icons) = within(Duration::from_secs(3), self.get_json(&url, None)).await {
       for i in icons["data"].as_array().into_iter().flatten() {
         if let (Some(id), Some(img)) = (i["targetId"].as_u64(), i["imageUrl"].as_str()) {
           for h in hits.iter_mut().filter(|h| h.universe_id == id) {
@@ -303,6 +309,13 @@ mod tests {
     assert_eq!(hits[0].url, "roblox.com/games/2753915549/Blox-Fruits");
     assert_eq!(hits[0].icon, None);
     assert_eq!(hits[1].url, "roblox.com/games/20");
+  }
+
+  #[test]
+  fn within_gives_up_on_a_hang() {
+    let hang = std::future::pending::<Result<(), ApiError>>();
+    let r = tauri::async_runtime::block_on(within(std::time::Duration::from_millis(20), hang));
+    assert!(matches!(r, Err(ApiError::Other(m)) if m.contains("too long")));
   }
 
   #[test]

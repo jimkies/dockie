@@ -20,7 +20,7 @@ function warnText(snap) {
 // A word that could be a username also gets "Follow @word" (parse_join treats it as one).
 function searchPlan(text) {
   const t = text.trim();
-  if (t.length < 2 || /^\d+(:\S*)?$/.test(t) || t.startsWith("@") || t.includes("/") || t.includes("roblox.com")) return null;
+  if (t.length < 2 || /^\d+(:\S*)?$/.test(t) || t.startsWith("@") || t.includes("/") || t.toLowerCase().includes("roblox.com")) return null;
   return { query: t, follow: /^[A-Za-z0-9_]{3,20}$/.test(t) ? t : null };
 }
 

@@ -36,3 +36,6 @@ assert.deepEqual(searchPlan("blox fruits"), { query: "blox fruits", follow: null
 assert.deepEqual(searchPlan("  Arsenal "), { query: "Arsenal", follow: "Arsenal" });
 assert.deepEqual(searchPlan("ab"), { query: "ab", follow: null });
 console.log("search ok");
+// A Roblox link is a link whatever its case (parse_join lowercases the host)
+assert.equal(searchPlan("WWW.ROBLOX.COM?placeId=920587237"), null);
+console.log("case ok");

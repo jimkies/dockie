@@ -100,6 +100,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 @keyframes drop-in { from { opacity: 0; scale: .97; } }
 .results .opt { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: center; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
 .results .opt:hover { background: var(--hover); }
+.results .game { transition: opacity 150ms ease-out; }
+.results[aria-busy=true] .game { opacity: .5; } /* last results, while the new ones load */
 .results .opt[aria-selected=true] { background: rgb(255 255 255 / .1); }
 .results .ic { width: 30px; height: 30px; border-radius: 7px; object-fit: cover; background: var(--raised); display: grid; place-items: center; color: var(--muted); }
 .results .ic.round { border-radius: 50%; }

@@ -277,7 +277,9 @@ function unqueue(id) {
 function launchSelected() {
   const userIds = [...selected];
   if (!userIds.length) return toast("Tick the accounts you want to launch first.");
-  call("launch", { userIds, target: $("join-all").value.trim() || null });
+  const target = $("join-all").value.trim() || null;
+  if (target && searchPlan(target) && !searchPlan(target).follow) return toast(PICK_HINT); // words, not a link: pick a game first
+  call("launch", { userIds, target });
 }
 
 // ---- Join boxes: words search Roblox games; a × clears the box ----
@@ -286,12 +288,13 @@ const PERSON = "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM5 20a7 7 0 0 1 14 0";
 function combo(input) {
   const list = $(input.getAttribute("aria-controls"));
   const clear = input.parentElement.querySelector(".clear");
-  let timer, seq = 0, active = -1, rows = [];
+  let timer, seq = 0, active = -1, rows = [], games = [];
   const close = () => {
     clearTimeout(timer);
     seq++; // a reply still on its way must not reopen the list
-    rows = []; active = -1;
+    rows = []; games = []; active = -1;
     list.hidden = true;
+    list.removeAttribute("aria-busy");
     input.setAttribute("aria-expanded", "false");
     input.removeAttribute("aria-activedescendant");
   };
@@ -315,7 +318,7 @@ function combo(input) {
     input.focus();
   };
   const row = (n, icon, title, sub, value) => {
-    const o = el("div", { id: `${list.id}-${n}`, className: "opt" }, icon,
+    const o = el("div", { id: `${list.id}-${n}`, className: n === "f" ? "opt" : "opt game" }, icon,
       el("div", { className: "txt" }, el("div", { className: "t", textContent: title }), el("div", { className: "s num", textContent: sub })));
     o.setAttribute("role", "option");
     o.setAttribute("aria-selected", "false");
@@ -335,20 +338,23 @@ function combo(input) {
   input.addEventListener("input", () => {
     clear.hidden = !input.value;
     const plan = searchPlan(input.value);
-    close();
-    if (!plan) return;
-    const mine = seq;
-    const follow = plan.follow ? [row(0, glyph(PERSON, true), `Follow @${plan.follow}`, "Join whatever they're playing", "@" + plan.follow)] : [];
-    rows = follow;
-    show([...follow.map((r) => r.el), status("Searching…")]);
+    if (!plan) return close();
+    clearTimeout(timer);
+    const mine = ++seq; // any reply still on its way is now stale
+    const follow = plan.follow ? [row("f", glyph(PERSON, true), `Follow @${plan.follow}`, "Join whatever they're playing", "@" + plan.follow)] : [];
+    rows = [...follow, ...games]; // the last results stay up, dimmed, so the list doesn't collapse on every key
+    setActive(-1);
+    list.setAttribute("aria-busy", "true");
+    show([...rows.map((r) => r.el), ...(games.length ? [] : [status("Searching…")])]);
     timer = setTimeout(async () => {
       let hits = [], failed = false;
       try { hits = await invoke("search_games", { query: plan.query }); } catch { failed = true; }
       if (mine !== seq) return; // the box changed, was cleared, picked or closed meanwhile
-      const games = hits.map((h, k) => row(follow.length + k,
+      games = hits.map((h, k) => row("g" + k,
         h.icon ? el("img", { className: "ic", alt: "", src: h.icon }) : glyph(GAMEPAD),
         h.name, `${h.players.toLocaleString()} playing`, h.url));
       rows = [...follow, ...games];
+      list.removeAttribute("aria-busy");
       const note = failed ? "Couldn't search Roblox right now" : games.length ? null : "No games found";
       show([...rows.map((r) => r.el), ...(note ? [status(note)] : [])]);
       setActive(Math.min(active, rows.length - 1));
