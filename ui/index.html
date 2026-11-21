@@ -7,72 +7,136 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="warn" class="bar warn" hidden>
-  <span>Roblox is already running — extra windows can't open.</span>
-  <button id="warn-close">Close all Roblox</button>
-</div>
-<div id="loaderr" class="bar err" hidden></div>
-
-<header>
-  <nav role="tablist">
+<header class="top">
+  <div class="brand"><span class="mark" aria-hidden="true"></span>Dockie</div>
+  <nav class="seg" role="tablist" aria-label="Sections">
     <button role="tab" data-tab="accounts" aria-selected="true">Accounts</button>
-    <button role="tab" data-tab="tools" aria-selected="false">Tools</button>
+    <button role="tab" data-tab="windows" aria-selected="false">Windows</button>
     <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
   </nav>
-  <div class="grow"></div>
-  <button id="signin">+ Sign in</button>
-  <button id="paste">Paste cookie</button>
 </header>
+
+<div id="warn" class="banner warn" hidden>
+  <span id="warn-text"></span>
+  <button id="warn-close" class="btn sm">Close all Roblox</button>
+</div>
+<div id="loaderr" class="banner err" hidden></div>
 
 <main>
   <section id="tab-accounts">
     <div class="toolbar">
-      <label>Join selected into: <input id="join-all" type="text" size="36" placeholder="paste link / id / @user"></label>
-      <button id="join-go">Go</button>
+      <input id="join-all" class="field grow" type="text" aria-label="Join selected into"
+        placeholder="Join selected into… link, place ID or @user"
+        title="Leave empty to use each account's own Join">
+      <button id="launch-sel" class="btn primary" disabled>Launch</button>
+      <button id="stop-all" class="btn" hidden>Stop all</button>
+      <div class="menu-wrap">
+        <button id="add-btn" class="btn" aria-haspopup="menu" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add account
+        </button>
+        <div class="menu right" role="menu">
+          <button role="menuitem" id="signin">Sign in with Roblox</button>
+          <button role="menuitem" id="paste">Paste a cookie…</button>
+        </div>
+      </div>
+      <div class="menu-wrap">
+        <button class="btn icon" aria-haspopup="menu" aria-expanded="false" aria-label="More">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>
+        </button>
+        <div class="menu right" role="menu">
+          <button role="menuitem" id="import">Import accounts…</button>
+          <button role="menuitem" id="export">Export accounts…</button>
+        </div>
+      </div>
     </div>
-    <div class="toolbar">
-      <button id="launch-sel">Launch selected</button>
-      <button id="stop-all">Stop all</button>
-      <div class="grow"></div>
-      <button id="import">Import</button>
-      <button id="export">Export</button>
+
+    <div id="grid" class="grid"></div>
+
+    <div id="empty" class="empty" hidden>
+      <span class="mark big" aria-hidden="true"></span>
+      <h1>Add your first Roblox account</h1>
+      <p>Sign in once, then open as many accounts side by side as you like.</p>
+      <div class="row">
+        <button id="empty-signin" class="btn primary lg">Sign in with Roblox</button>
+        <button id="empty-paste" class="btn lg">Paste a cookie</button>
+      </div>
     </div>
-    <div id="rows"></div>
-    <p id="empty" class="muted" hidden>No accounts yet. Use Sign in or Paste cookie.</p>
   </section>
 
-  <section id="tab-tools" hidden>
-    <div class="toolbar">
+  <section id="tab-windows" hidden>
+    <div class="section-head">
       <h2>Running Roblox windows</h2>
-      <div class="grow"></div>
-      <button id="close-all">Close all Roblox</button>
+      <button id="close-all" class="btn">Close all Roblox</button>
     </div>
-    <div id="windows"></div>
+    <div id="windows" class="list"></div>
   </section>
 
   <section id="tab-settings" hidden>
-    <p><label>Default FPS cap <input id="set-fps" type="number" min="1" placeholder="none"></label></p>
-    <p><label><input id="set-trim" type="checkbox"> Free RAM from minimized windows</label></p>
-    <p><button id="open-data">Open data folder</button></p>
-    <p id="version" class="muted"></p>
+    <div class="card">
+      <h2>Launching</h2>
+      <div class="setting">
+        <div><label for="set-fps">Default FPS cap</label>
+          <p class="help">Used when an account has no FPS cap of its own. Leave empty and Dockie never touches Roblox's setting.</p></div>
+        <input id="set-fps" class="field num" type="number" min="1" placeholder="None">
+      </div>
+    </div>
+    <div class="card">
+      <h2>Performance</h2>
+      <div class="setting">
+        <div><label for="set-trim">Free RAM from minimized windows</label>
+          <p class="help">Moves the idle memory of minimized Dockie windows to disk. Expect a short stutter when you reopen one.</p></div>
+        <input id="set-trim" class="switch" type="checkbox" role="switch">
+      </div>
+    </div>
+    <div class="card">
+      <h2>Data</h2>
+      <div class="setting">
+        <div><span class="label">Accounts and settings</span>
+          <p class="help">Stored on this PC, with sign-ins encrypted to your Windows account.</p></div>
+        <button id="open-data" class="btn">Open folder</button>
+      </div>
+      <p id="version" class="help version"></p>
+    </div>
   </section>
 </main>
 
 <div id="toasts" aria-live="polite"></div>
 
-<dialog id="paste-dlg">
+<dialog id="paste-dlg" class="sheet">
   <form method="dialog">
-    <label>Paste a .ROBLOSECURITY cookie<br>
-      <textarea id="paste-text" rows="5" cols="52"></textarea>
-    </label>
-    <div class="toolbar">
-      <div class="grow"></div>
-      <button value="cancel">Cancel</button>
-      <button id="paste-ok" value="ok">Add</button>
+    <h2>Paste a cookie</h2>
+    <p class="help">Paste an account's <code>.ROBLOSECURITY</code> cookie. Dockie checks it with Roblox before saving.</p>
+    <textarea id="paste-text" class="field" rows="5" aria-label=".ROBLOSECURITY cookie"></textarea>
+    <div class="actions">
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn primary" value="ok">Add account</button>
     </div>
   </form>
 </dialog>
 
+<dialog id="edit-dlg" class="sheet">
+  <form method="dialog">
+    <h2 id="edit-title">Edit account</h2>
+    <label class="stack">Join
+      <input id="edit-join" class="field" type="text" placeholder="Empty = Roblox home. A link, place ID, private server or @user">
+      <span id="edit-join-label" class="help"></span>
+    </label>
+    <div class="two">
+      <label class="stack">FPS cap
+        <input id="edit-fps" class="field num" type="number" min="1" placeholder="Default">
+      </label>
+      <label class="stack">Note
+        <input id="edit-note" class="field" type="text" placeholder="e.g. Jake's alt">
+      </label>
+    </div>
+    <div class="actions">
+      <button class="btn" value="cancel">Cancel</button>
+      <button id="edit-save" class="btn primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="state.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
