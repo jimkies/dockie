@@ -226,9 +226,9 @@ function renderTile(a, i) {
     navigator.clipboard.writeText(a.username).then(() => {
       copy.textContent = "Copied";
       if (!reduceMotion()) copy.animate([{ opacity: 0, filter: "blur(3px)" }, { opacity: 1, filter: "blur(0)" }], { duration: 150, easing: "ease-out" });
-      setTimeout(closeMenus, 900);
+      setTimeout(() => copy.closest(".menu.open") && closeMenus(), 900); // only if this menu is still the open one
       setTimeout(() => (copy.textContent = "Copy username"), 1100); // after the menu has faded out
-    }, fail);
+    }, (err) => { closeMenus(); fail(err); });
   });
   const remove = el("button", { className: "danger", textContent: "Remove" });
   remove.setAttribute("role", "menuitem");
@@ -530,7 +530,8 @@ function winCard(pid) {
     name.textContent = a ? a.display_name : w.title || "Roblox";
     sub.textContent = a ? "@" + a.username : w.user_id != null ? "Opened by Dockie" : "Not opened by Dockie";
     pill.className = "pill " + (w.minimized ? "busy" : "ok");
-    pill.replaceChildren(w.minimized ? "Minimized" : "Running", el("span", { className: "up num", textContent: fmtUptime(w.uptime_s) }));
+    const up = w.uptime_s != null ? [el("span", { className: "up num", textContent: fmtUptime(w.uptime_s) })] : []; // unknown start: no time shown
+    pill.replaceChildren(w.minimized ? "Minimized" : "Running", ...up);
     const p = w.user_id != null ? previews.get(w.user_id) : null;
     const image = !w.minimized && p?.image ? p.image : "";
     img.hidden = !image;
@@ -560,7 +561,7 @@ async function renderWindows() {
   for (const id of ["stats", "windows", "close-all"]) $(id).hidden = none;
   $("win-empty").hidden = !none;
   uptimes.clear();
-  for (const w of list) if (w.user_id != null) uptimes.set(w.user_id, w.uptime_s);
+  for (const w of list) if (w.user_id != null && w.uptime_s != null) uptimes.set(w.user_id, w.uptime_s);
   for (const paint of cells.values()) paint();
 }
 

@@ -197,6 +197,11 @@ pub fn uptime_secs(created: u64, now: u64) -> u64 {
   now.saturating_sub(created) / 10_000_000
 }
 
+/// Time running, or None when the start time is unknown (`created` is 0 when Windows won't say).
+pub fn uptime_of(created: u64, now: u64) -> Option<u64> {
+  (created != 0).then(|| uptime_secs(created, now))
+}
+
 pub fn trim(pid: u32) -> Result<()> {
   unsafe {
     let h = OpenProcess(PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION, false, pid)?;
@@ -249,6 +254,13 @@ mod tests {
     let c = 133_000_000_000_000_000u64;
     assert_eq!(uptime_secs(c, c + 90 * 10_000_000 + 9_999_999), 90);
     assert_eq!(uptime_secs(c + 5, c), 0); // clock skew never underflows
+  }
+
+  #[test]
+  fn unknown_start_time_has_no_uptime() {
+    let c = 133_000_000_000_000_000u64;
+    assert_eq!(uptime_of(0, c), None); // created() is 0 when Windows won't say
+    assert_eq!(uptime_of(c, c + 90 * 10_000_000), Some(90));
   }
 
   #[test]

@@ -38,7 +38,7 @@ pub struct RobloxWindow {
   pub title: String,
   pub user_id: Option<u64>,
   pub mem_bytes: Option<u64>,
-  pub uptime_s: u64,
+  pub uptime_s: Option<u64>,
   pub minimized: bool,
 }
 
@@ -255,7 +255,7 @@ pub fn windows(ctx: &AppCtx) -> Vec<RobloxWindow> {
         title: procs::title(hwnd),
         user_id,
         mem_bytes: procs::working_set(pid),
-        uptime_s: procs::uptime_secs(p.created, now),
+        uptime_s: procs::uptime_of(p.created, now),
         minimized: procs::is_minimized(hwnd),
       })
     })
