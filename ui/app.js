@@ -18,10 +18,11 @@ function el(tag, props = {}, ...kids) {
   e.append(...kids);
   return e;
 }
-function svg(d) {
+function svg(d, cls) {
   const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   s.setAttribute("viewBox", "0 0 24 24");
   s.setAttribute("aria-hidden", "true");
+  if (cls) s.setAttribute("class", cls);
   const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
   p.setAttribute("d", d);
   s.append(p);
@@ -33,6 +34,24 @@ function toast(message) {
   setTimeout(() => t.animate([{}, { opacity: 0, translate: "0 4px" }], { duration: 150, easing: "ease-out" }).finished.then(() => t.remove()), 5000);
 }
 const fail = (e) => toast(String(e));
+
+// Button labels with an icon. A changed label blur-crossfades into the new one, so
+// Launch -> Cancel -> Stop reads as one button changing, not a jump. Same label: no-op.
+const ICONS = { play: "M8 5.5v13l10.5-6.5Z", stop: "M7 7h10v10H7Z" };
+function setLabel(btn, icon, text) {
+  if (btn.dataset.label === text) return;
+  const first = btn.dataset.label === undefined;
+  btn.dataset.label = text;
+  const glyph = icon === "spin" ? [el("span", { className: "spin" })] : icon ? [svg(ICONS[icon], "i-" + icon)] : [];
+  const next = el("span", { className: "lbl" }, ...glyph, text);
+  const old = btn.querySelector(":scope > .lbl:not(.out)");
+  if (first || !old || reduceMotion()) return btn.replaceChildren(next);
+  old.classList.add("out"); // stays in the same grid cell while it fades
+  btn.append(next);
+  const fade = (from, to) => [{ opacity: from, filter: `blur(${4 - 4 * from}px)` }, { opacity: to, filter: `blur(${4 - 4 * to}px)` }];
+  next.animate(fade(0, 1), { duration: 150, easing: "ease-out" });
+  old.animate(fade(1, 0), { duration: 150, easing: "ease-out" }).finished.then(() => old.remove(), () => old.remove());
+}
 const call = (cmd, args) => invoke(cmd, args).catch(fail);
 
 // ---- menus: a trigger with aria-haspopup opens the .menu next to it ----
@@ -204,7 +223,15 @@ function renderTile(a, i) {
   edit.addEventListener("click", () => openEdit(a));
   const copy = el("button", { textContent: "Copy username" });
   copy.setAttribute("role", "menuitem");
-  copy.addEventListener("click", () => navigator.clipboard.writeText(a.username).then(() => toast(`Copied @${a.username}`), fail));
+  copy.addEventListener("click", (e) => {
+    e.stopPropagation(); // the menu stays open a moment so "Copied ✓" is seen in place
+    navigator.clipboard.writeText(a.username).then(() => {
+      copy.textContent = "Copied ✓";
+      if (!reduceMotion()) copy.animate([{ opacity: 0, filter: "blur(3px)" }, { opacity: 1, filter: "blur(0)" }], { duration: 150, easing: "ease-out" });
+      setTimeout(closeMenus, 900);
+      setTimeout(() => (copy.textContent = "Copy username"), 1100); // after the menu has faded out
+    }, fail);
+  });
   const remove = el("button", { className: "danger", textContent: "Remove" });
   remove.setAttribute("role", "menuitem");
   remove.addEventListener("click", async () => {
@@ -234,7 +261,10 @@ function renderTile(a, i) {
     err.textContent = s.error ?? "";
     err.hidden = !s.error;
     btn.dataset.act = s.action;
-    btn.textContent = s.action === "stop" ? "Stop" : s.action === "signin" ? "Sign in again" : "Launch";
+    const starting = s.pill === "Launching" || s.pill === "Queued"; // the button cancels; the pill says what's happening
+    if (s.action === "stop") setLabel(btn, starting ? "spin" : "stop", starting ? "Cancel" : "Stop");
+    else if (s.action === "signin") setLabel(btn, null, "Sign in again");
+    else setLabel(btn, "play", "Launch");
     btn.className = "btn" + (s.action === "stop" ? "" : " primary");
     const p = previews.get(id);
     const image = isRunning && !p?.minimized && p?.image ? p.image : "";
@@ -274,7 +304,7 @@ function addTile(i) {
 function updateToolbar() {
   const n = selected.size;
   $("launch-sel").disabled = n === 0;
-  $("launch-sel").textContent = n ? `Launch ${n}` : "Launch";
+  setLabel($("launch-sel"), "play", n ? `Launch ${n}` : "Launch");
   $("launch-sel").title = n ? "" : "Tick accounts to launch them together";
   const busy = [...launch.values()].some((l) => l.state === "queued" || l.state === "launching");
   $("stop-all").hidden = running.size === 0 && !busy;
@@ -524,6 +554,7 @@ $("close-all").addEventListener("click", closeAll);
 for (const id of ["signin", "empty-signin"]) $(id).addEventListener("click", () => signIn(null));
 for (const id of ["paste", "empty-paste"]) $(id).addEventListener("click", openPaste);
 $("launch-sel").addEventListener("click", launchSelected);
+setLabel($("stop-all"), "stop", "Stop all");
 $("join-all").addEventListener("keydown", (e) => { if (e.key === "Enter") launchSelected(); });
 $("stop-all").addEventListener("click", async () => {
   await call("stop_all");
