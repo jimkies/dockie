@@ -1,7 +1,8 @@
 use crate::join::{JoinTarget, Resolved};
 use reqwest::{Client, Method, RequestBuilder, Response, StatusCode};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::sync::OnceLock;
 
 #[derive(Debug)]
 pub enum ApiError {
@@ -45,6 +46,42 @@ pub fn normalize_cookie(raw: &str) -> String {
 pub fn parse_share_resolve(v: &Value) -> Option<(u64, String)> {
   let d = v.get("privateServerInviteData")?;
   Some((d.get("placeId")?.as_u64()?, d.get("linkCode")?.as_str()?.to_string()))
+}
+
+#[derive(Debug, Serialize)]
+pub struct GameHit {
+  pub place_id: u64,
+  pub universe_id: u64,
+  pub name: String,
+  pub players: u64,
+  /// What a pick puts in the Join box; parse_join reads it as the game.
+  pub url: String,
+  pub icon: Option<String>,
+}
+
+/// Games from an omni-search reply, at most eight, skipping entries Dockie can't join.
+pub fn parse_game_search(v: &Value) -> Vec<GameHit> {
+  let list = |v: &Value| v.as_array().cloned().unwrap_or_default();
+  list(&v["searchResults"])
+    .iter()
+    .filter(|g| g["contentGroupType"] == "Game")
+    .flat_map(|g| list(&g["contents"]))
+    .filter_map(|c| {
+      let place_id = c["rootPlaceId"].as_u64()?;
+      Some(GameHit {
+        place_id,
+        universe_id: c["universeId"].as_u64()?,
+        name: c["name"].as_str()?.to_string(),
+        players: c["playerCount"].as_u64().unwrap_or(0),
+        url: match c["canonicalUrlPath"].as_str() {
+          Some(p) if p.starts_with("/games/") => format!("roblox.com{p}"),
+          _ => format!("roblox.com/games/{place_id}"),
+        },
+        icon: None,
+      })
+    })
+    .take(8)
+    .collect()
 }
 
 pub struct Api {
@@ -174,6 +211,38 @@ impl Api {
     })
   }
 
+  pub async fn search_games(&self, query: &str) -> Result<Vec<GameHit>, ApiError> {
+    // omni-search returns nothing without a UUID-shaped sessionId; any value works, so make one per run.
+    static SESSION: OnceLock<String> = OnceLock::new();
+    let session = SESSION.get_or_init(|| {
+      let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+      let h = format!("{n:032x}");
+      format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
+    });
+    let q: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
+    let url = format!("https://apis.roblox.com/search-api/omni-search?searchQuery={q}&sessionId={session}&pageType=all");
+    let mut hits = parse_game_search(&self.get_json(&url, None).await?);
+    if hits.is_empty() {
+      return Ok(hits);
+    }
+    let ids: Vec<String> = hits.iter().map(|h| h.universe_id.to_string()).collect();
+    let url = format!(
+      "https://thumbnails.roblox.com/v1/games/icons?universeIds={}&size=150x150&format=Png&isCircular=false",
+      ids.join(",")
+    );
+    // Icons are decoration: if this call fails, show the games without them.
+    if let Ok(icons) = self.get_json(&url, None).await {
+      for i in icons["data"].as_array().into_iter().flatten() {
+        if let (Some(id), Some(img)) = (i["targetId"].as_u64(), i["imageUrl"].as_str()) {
+          for h in hits.iter_mut().filter(|h| h.universe_id == id) {
+            h.icon = Some(img.to_string());
+          }
+        }
+      }
+    }
+    Ok(hits)
+  }
+
   async fn place_label(&self, place_id: u64) -> Result<String, ApiError> {
     Ok(self.game_name(place_id).await?.unwrap_or_else(|| format!("Place {place_id}")))
   }
@@ -203,6 +272,45 @@ mod tests {
     assert_eq!(normalize_cookie("  \"_|WARNING:x|_ABC\"\n"), "_|WARNING:x|_ABC");
     assert_eq!(normalize_cookie(".ROBLOSECURITY=_|WARNING:x|_ABC"), "_|WARNING:x|_ABC");
     assert_eq!(normalize_cookie("_|WARNING:x|_ABC; path=/"), "_|WARNING:x|_ABC");
+  }
+
+  #[test]
+  fn parses_game_search() {
+    let game = |id: u64, place: Option<u64>, path: Option<&str>| {
+      let mut g = json!({"universeId": id, "name": format!("Game {id}"), "playerCount": 5});
+      if let Some(p) = place {
+        g["rootPlaceId"] = json!(p);
+      }
+      if let Some(p) = path {
+        g["canonicalUrlPath"] = json!(p);
+      }
+      g
+    };
+    let v = json!({"searchResults": [
+      {"contentGroupType": "Game", "contents": [
+        game(994732206, Some(2753915549), Some("/games/2753915549/Blox-Fruits")),
+        game(2, Some(20), None),
+        game(3, None, None),
+      ]},
+      {"contentGroupType": "User", "contents": [game(4, Some(40), None)]},
+    ]});
+    let hits = parse_game_search(&v);
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].place_id, 2753915549);
+    assert_eq!(hits[0].universe_id, 994732206);
+    assert_eq!(hits[0].name, "Game 994732206");
+    assert_eq!(hits[0].players, 5);
+    assert_eq!(hits[0].url, "roblox.com/games/2753915549/Blox-Fruits");
+    assert_eq!(hits[0].icon, None);
+    assert_eq!(hits[1].url, "roblox.com/games/20");
+  }
+
+  #[test]
+  fn game_search_keeps_eight() {
+    let many: Vec<Value> =
+      (1..=12u64).map(|i| json!({"universeId": i, "name": "g", "playerCount": 0, "rootPlaceId": i})).collect();
+    let v = json!({"searchResults": [{"contentGroupType": "Game", "contents": many}]});
+    assert_eq!(parse_game_search(&v).len(), 8);
   }
 
   #[test]

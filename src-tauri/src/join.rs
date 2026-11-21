@@ -116,6 +116,7 @@ mod tests {
     #[test] fn empty() { assert_eq!(parse_join(""), Ok(Home)); }
     #[test] fn blank() { assert_eq!(parse_join("   \n"), Ok(Home)); }
     #[test] fn digits() { assert_eq!(parse_join("920587237"), Ok(Game { place_id: 920587237 })); }
+    #[test] fn search_pick_url() { assert_eq!(parse_join("roblox.com/games/2753915549/Blox-Fruits"), Ok(Game { place_id: 2753915549 })); }
     #[test] fn games_url() { assert_eq!(parse_join("https://www.roblox.com/games/920587237/Adopt-Me"), Ok(Game { place_id: 920587237 })); }
     #[test] fn schemeless_upper() { assert_eq!(parse_join("  WWW.ROBLOX.COM/games/920587237/Adopt-Me?foo=1 \n"), Ok(Game { place_id: 920587237 })); }
     #[test] fn web_host() { assert_eq!(parse_join("https://web.roblox.com/games/920587237"), Ok(Game { place_id: 920587237 })); }

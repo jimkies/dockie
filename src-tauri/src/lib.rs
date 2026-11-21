@@ -49,6 +49,7 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       commands::get_snapshot,
+      commands::search_games,
       commands::add_cookie,
       commands::begin_login,
       commands::cancel_login,
