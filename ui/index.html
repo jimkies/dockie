@@ -39,9 +39,14 @@
 <main>
   <section id="tab-accounts">
     <div class="toolbar">
-      <input id="join-all" class="field grow" type="text" aria-label="Join selected into"
-        placeholder="Join selected into… link, place ID or @user"
-        title="Leave empty to use each account's own Join">
+      <div class="combo grow">
+        <input id="join-all" class="field" type="text" aria-label="Join selected into"
+          role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="join-all-results" autocomplete="off" spellcheck="false"
+          placeholder="Join selected into… game, link or @user"
+          title="Leave empty to use each account's own Join">
+        <button type="button" class="clear" aria-label="Clear" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8l8 8M16 8l-8 8"/></svg></button>
+        <div id="join-all-results" class="results" role="listbox" aria-label="Games" hidden></div>
+      </div>
       <button id="launch-sel" class="btn primary" disabled>Launch</button>
       <button id="stop-all" class="btn" hidden>Stop all</button>
       <div class="menu-wrap">
@@ -132,10 +137,17 @@
 <dialog id="edit-dlg" class="sheet">
   <form method="dialog">
     <h2 id="edit-title">Edit account</h2>
-    <label class="stack">Join
-      <input id="edit-join" class="field" type="text" placeholder="Empty = Roblox home. A link, place ID, private server or @user">
-      <span id="edit-join-label" class="help"></span>
-    </label>
+    <div class="stack">
+      <label for="edit-join">Join</label>
+      <div class="combo">
+        <input id="edit-join" class="field" type="text"
+          role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="edit-join-results" aria-describedby="edit-join-label" autocomplete="off" spellcheck="false"
+          placeholder="Search a game, or paste a link, place ID or @user">
+        <button type="button" class="clear" aria-label="Clear" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8l8 8M16 8l-8 8"/></svg></button>
+        <div id="edit-join-results" class="results" role="listbox" aria-label="Games" hidden></div>
+      </div>
+      <span id="edit-join-label" class="help" aria-live="polite"></span>
+    </div>
     <div class="two">
       <label class="stack">FPS cap
         <input id="edit-fps" class="field num" type="number" min="1" placeholder="Default">

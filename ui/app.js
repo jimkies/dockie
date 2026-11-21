@@ -255,6 +255,101 @@ function launchSelected() {
   call("launch", { userIds, target: $("join-all").value.trim() || null });
 }
 
+// ---- Join boxes: words search Roblox games; a × clears the box ----
+const GAMEPAD = "M6 11h4M8 9v4M15 12h.01M18 10h.01M17.3 5H6.7a4 4 0 0 0-4 3.6l-.7 6.4A2.5 2.5 0 0 0 4.5 18c.9 0 1.6-.5 2.1-1.2L8 15h8l1.4 1.8c.5.7 1.2 1.2 2.1 1.2a2.5 2.5 0 0 0 2.5-3l-.7-6.4a4 4 0 0 0-4-3.6Z";
+const PERSON = "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM5 20a7 7 0 0 1 14 0";
+function combo(input) {
+  const list = $(input.getAttribute("aria-controls"));
+  const clear = input.parentElement.querySelector(".clear");
+  let timer, seq = 0, active = -1, rows = [];
+  const close = () => {
+    clearTimeout(timer);
+    seq++; // a reply still on its way must not reopen the list
+    rows = []; active = -1;
+    list.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+  };
+  const show = (kids) => {
+    list.replaceChildren(...kids);
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  };
+  const status = (text) => el("div", { className: "status", textContent: text });
+  const setActive = (n) => {
+    active = n;
+    rows.forEach((r, k) => r.el.setAttribute("aria-selected", String(k === n)));
+    if (n < 0) return input.removeAttribute("aria-activedescendant");
+    input.setAttribute("aria-activedescendant", rows[n].el.id);
+    rows[n].el.scrollIntoView({ block: "nearest" });
+  };
+  const pick = (value) => {
+    input.value = value;
+    close();
+    input.dispatchEvent(new Event("input", { bubbles: true })); // a link or @user never searches, so the list stays shut
+    input.focus();
+  };
+  const row = (n, icon, title, sub, value) => {
+    const o = el("div", { id: `${list.id}-${n}`, className: "opt" }, icon,
+      el("div", { className: "txt" }, el("div", { className: "t", textContent: title }), el("div", { className: "s num", textContent: sub })));
+    o.setAttribute("role", "option");
+    o.setAttribute("aria-selected", "false");
+    o.addEventListener("click", () => pick(value));
+    return { el: o, value };
+  };
+  const glyph = (d, round) => el("div", { className: "ic" + (round ? " round" : "") }, svg(d));
+  const sync = () => { clear.hidden = !input.value; close(); };
+
+  list.addEventListener("mousedown", (e) => e.preventDefault()); // clicking a row or the scrollbar keeps focus in the box
+  input.addEventListener("blur", close);
+  clear.addEventListener("click", () => {
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.focus();
+  });
+  input.addEventListener("input", () => {
+    clear.hidden = !input.value;
+    const plan = searchPlan(input.value);
+    close();
+    if (!plan) return;
+    const mine = seq;
+    const follow = plan.follow ? [row(0, glyph(PERSON, true), `Follow @${plan.follow}`, "Join whatever they're playing", "@" + plan.follow)] : [];
+    rows = follow;
+    show([...follow.map((r) => r.el), status("Searching…")]);
+    timer = setTimeout(async () => {
+      let hits = [], failed = false;
+      try { hits = await invoke("search_games", { query: plan.query }); } catch { failed = true; }
+      if (mine !== seq) return; // the box changed, was cleared, picked or closed meanwhile
+      const games = hits.map((h, k) => row(follow.length + k,
+        h.icon ? el("img", { className: "ic", alt: "", src: h.icon }) : glyph(GAMEPAD),
+        h.name, `${h.players.toLocaleString()} playing`, h.url));
+      rows = [...follow, ...games];
+      const note = failed ? "Couldn't search Roblox right now" : games.length ? null : "No games found";
+      show([...rows.map((r) => r.el), ...(note ? [status(note)] : [])]);
+      setActive(Math.min(active, rows.length - 1));
+    }, 250);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (list.hidden) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const n = rows.length + 1; // the rows, plus "nothing highlighted"
+      if (n > 1) setActive(((active + 1 + (e.key === "ArrowDown" ? 1 : -1) + n) % n) - 1);
+    } else if (e.key === "Enter" && active >= 0) {
+      e.preventDefault(); // not Save, not Launch: Enter picks the highlighted row
+      e.stopImmediatePropagation();
+      pick(rows[active].value);
+    } else if (e.key === "Escape") {
+      e.preventDefault(); // closes the list, not the Edit sheet
+      e.stopPropagation();
+      close();
+    }
+  });
+  return { sync };
+}
+combo($("join-all"));
+const editCombo = combo($("edit-join"));
+
 // ---- edit sheet: holds its own copy of the values until Save ----
 let editing_acc = null;
 let describeTimer;
@@ -276,6 +371,7 @@ function openEdit(a) {
   $("edit-join").value = a.join;
   $("edit-fps").value = a.fps_cap ?? "";
   $("edit-note").value = a.note;
+  editCombo.sync();
   describeEditJoin();
   $("edit-dlg").showModal();
 }
