@@ -376,6 +376,7 @@ combo($("join-all"));
 const editCombo = combo($("edit-join"));
 
 // ---- edit sheet: holds its own copy of the values until Save ----
+const PICK_HINT = "Pick a game from the list, or paste a link.";
 let editing_acc = null;
 let describeTimer;
 function describeEditJoin() {
@@ -385,6 +386,7 @@ function describeEditJoin() {
   label.textContent = text.trim() ? "Checking…" : "Opens the Roblox home screen.";
   clearTimeout(describeTimer);
   if (!text.trim()) return;
+  if (searchPlan(text) && !searchPlan(text).follow) return void (label.textContent = PICK_HINT); // words: a search, not a broken link
   describeTimer = setTimeout(async () => {
     let l, bad = false;
     try { l = await invoke("describe_join", { userId: editing_acc.user_id, text }); } catch (e) { l = String(e); bad = true; }
@@ -420,7 +422,7 @@ $("edit-save").addEventListener("click", async (e) => {
     try {
       await invoke("set_join", { userId: id, join });
     } catch (err) {
-      $("edit-join-label").textContent = String(err);
+      $("edit-join-label").textContent = searchPlan(join) && !searchPlan(join).follow ? PICK_HINT : String(err);
       $("edit-join-label").className = "help bad";
       if (!reduceMotion()) $("edit-join").animate([{ translate: "0" }, { translate: "-8px" }, { translate: "8px" }, { translate: "-5px" }, { translate: "5px" }, { translate: "-2px" }, { translate: "0" }], { duration: 360, easing: "ease-out" });
       $("edit-join").focus();
