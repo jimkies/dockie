@@ -93,9 +93,31 @@ appWindow.onResized(() => syncMax().catch(() => {}));
 syncMax().catch(() => {});
 
 // ---- shell ----
+// The selected tab's pill slides under whichever tab is picked.
+function placePill() {
+  const b = document.querySelector("[role=tab][aria-selected=true]");
+  const pill = document.querySelector(".seg-pill");
+  pill.style.setProperty("--x", b.offsetLeft + "px");
+  pill.style.setProperty("--w", b.offsetWidth + "px");
+}
+new ResizeObserver(placePill).observe(document.querySelector(".seg"));
+placePill();
+// first placement jumps; only later moves slide
+requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector(".seg").classList.add("ready")));
+
+let currentTab = "accounts";
 function showTab(name) {
+  const step = tabStep(currentTab, name); // the page slides in from the side you're heading to
+  currentTab = name;
   for (const b of document.querySelectorAll("[role=tab]")) b.setAttribute("aria-selected", b.dataset.tab === name);
-  for (const t of ["accounts", "windows", "settings"]) $("tab-" + t).hidden = t !== name;
+  placePill();
+  for (const t of TABS) {
+    for (const a of $("tab-" + t).getAnimations()) a.cancel(); // a fast second click never leaves a half-faded page
+    $("tab-" + t).hidden = t !== name;
+  }
+  if (step && !reduceMotion()) {
+    $("tab-" + name).animate([{ opacity: 0, translate: `${24 * step}px 0` }, { opacity: 1, translate: "0 0" }], { duration: 220, easing: "cubic-bezier(.22, 1, .36, 1)" });
+  }
   clearInterval(showTab.timer);
   if (name === "windows") { renderWindows(); showTab.timer = setInterval(renderWindows, 2000); }
 }
