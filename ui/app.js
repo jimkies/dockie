@@ -11,6 +11,7 @@ const launch = new Map();   // user_id -> { state, message }
 const previews = new Map(); // user_id -> { minimized, image }
 const running = new Set();
 const cells = new Map();    // user_id -> paint() for that tile
+const uptimes = new Map();  // user_id -> seconds its window has been open, from the window poll
 
 function el(tag, props = {}, ...kids) {
   const e = document.createElement(tag);
@@ -35,15 +36,13 @@ function toast(message) {
 }
 const fail = (e) => toast(String(e));
 
-// Button labels with an icon. A changed label blur-crossfades into the new one, so
-// Launch -> Cancel -> Stop reads as one button changing, not a jump. Same label: no-op.
-const ICONS = { play: "M8 5.5v13l10.5-6.5Z", stop: "M7 7h10v10H7Z" };
-function setLabel(btn, icon, text) {
+// Button labels. A changed label blur-crossfades into the new one, so Launch -> Cancel -> Stop
+// reads as one button changing, not a jump. Same label: no-op.
+function setLabel(btn, text) {
   if (btn.dataset.label === text) return;
   const first = btn.dataset.label === undefined;
   btn.dataset.label = text;
-  const glyph = icon === "spin" ? [el("span", { className: "spin" })] : icon ? [svg(ICONS[icon], "i-" + icon)] : [];
-  const next = el("span", { className: "lbl" }, ...glyph, text);
+  const next = el("span", { className: "lbl", textContent: text });
   const old = btn.querySelector(":scope > .lbl:not(.out)");
   if (first || !old || reduceMotion()) return btn.replaceChildren(next);
   old.classList.add("out"); // stays in the same grid cell while it fades
@@ -137,8 +136,7 @@ function showTab(name) {
   if (step && !reduceMotion()) {
     $("tab-" + name).animate([{ opacity: 0, translate: `${24 * step}px 0` }, { opacity: 1, translate: "0 0" }], { duration: 220, easing: "cubic-bezier(.22, 1, .36, 1)" });
   }
-  clearInterval(showTab.timer);
-  if (name === "windows") { renderWindows(); showTab.timer = setInterval(renderWindows, 2000); }
+  if (name === "windows") renderWindows(); // fresh numbers right away; the poll keeps them current
 }
 function renderBars() {
   const w = warnText(snap);
@@ -224,9 +222,9 @@ function renderTile(a, i) {
   const copy = el("button", { textContent: "Copy username" });
   copy.setAttribute("role", "menuitem");
   copy.addEventListener("click", (e) => {
-    e.stopPropagation(); // the menu stays open a moment so "Copied ✓" is seen in place
+    e.stopPropagation(); // the menu stays open a moment so "Copied" is seen in place
     navigator.clipboard.writeText(a.username).then(() => {
-      copy.textContent = "Copied ✓";
+      copy.textContent = "Copied";
       if (!reduceMotion()) copy.animate([{ opacity: 0, filter: "blur(3px)" }, { opacity: 1, filter: "blur(0)" }], { duration: 150, easing: "ease-out" });
       setTimeout(closeMenus, 900);
       setTimeout(() => (copy.textContent = "Copy username"), 1100); // after the menu has faded out
@@ -257,15 +255,16 @@ function renderTile(a, i) {
     const isRunning = running.has(id);
     const s = tileState(a, launch.get(id), isRunning);
     pill.className = "pill " + s.tone;
-    pill.textContent = s.pill;
+    const up = isRunning ? uptimes.get(id) : undefined; // the live dot plus time running
+    pill.replaceChildren(s.pill, ...(up != null ? [el("span", { className: "up num", textContent: fmtUptime(up) })] : []));
     err.textContent = s.error ?? "";
     err.hidden = !s.error;
     btn.dataset.act = s.action;
     const starting = s.pill === "Launching" || s.pill === "Queued"; // the button cancels; the pill says what's happening
-    if (s.action === "stop") setLabel(btn, starting ? "spin" : "stop", starting ? "Cancel" : "Stop");
-    else if (s.action === "signin") setLabel(btn, null, "Sign in again");
-    else setLabel(btn, "play", "Launch");
-    btn.className = "btn" + (s.action === "stop" ? "" : " primary");
+    if (s.action === "stop") setLabel(btn, starting ? "Cancel" : "Stop");
+    else if (s.action === "signin") setLabel(btn, "Sign in again");
+    else setLabel(btn, "Launch");
+    btn.className = "btn"; // the toolbar's Launch is the one main action on this screen
     const p = previews.get(id);
     const image = isRunning && !p?.minimized && p?.image ? p.image : "";
     img.hidden = !image;
@@ -295,8 +294,7 @@ function addTile(i) {
   main.addEventListener("click", () => signIn(null));
   const paste = el("button", { className: "link", textContent: "or paste a cookie" });
   paste.addEventListener("click", openPaste);
-  const plus = el("div", { className: "big-plus" }, svg("M12 5v14M5 12h14"));
-  const t = el("div", { className: "tile add" }, plus, main, paste);
+  const t = el("div", { className: "tile add" }, main, paste);
   if (firstRender) { t.classList.add("enter"); t.style.setProperty("--i", i); }
   return t;
 }
@@ -304,7 +302,7 @@ function addTile(i) {
 function updateToolbar() {
   const n = selected.size;
   $("launch-sel").disabled = n === 0;
-  setLabel($("launch-sel"), "play", n ? `Launch ${n}` : "Launch");
+  setLabel($("launch-sel"), n ? `Launch ${n}` : "Launch");
   $("launch-sel").title = n ? "" : "Tick accounts to launch them together";
   const busy = [...launch.values()].some((l) => l.state === "queued" || l.state === "launching");
   $("stop-all").hidden = running.size === 0 && !busy;
@@ -522,7 +520,7 @@ function winCard(pid) {
   const close = el("button", { className: "btn sm danger", textContent: "Close" });
   close.addEventListener("click", () => call("close_pid", { pid }).then(renderWindows));
   const meta = el("div", { className: "meta" });
-  const card = el("article", { className: "tile enter" }, shot, el("div", { className: "body" }, av, el("div", { className: "who" }, name, sub), focusBtn, close), meta);
+  const card = el("article", { className: "tile" }, shot, el("div", { className: "body" }, av, el("div", { className: "who" }, name, sub), focusBtn, close), meta);
   card.dataset.pid = pid;
   let face; // whose avatar is showing, so it's only rebuilt when that changes
   const paint = (w) => {
@@ -532,21 +530,21 @@ function winCard(pid) {
     name.textContent = a ? a.display_name : w.title || "Roblox";
     sub.textContent = a ? "@" + a.username : w.user_id != null ? "Opened by Dockie" : "Not opened by Dockie";
     pill.className = "pill " + (w.minimized ? "busy" : "ok");
-    pill.textContent = w.minimized ? "Minimized" : "Running";
+    pill.replaceChildren(w.minimized ? "Minimized" : "Running", el("span", { className: "up num", textContent: fmtUptime(w.uptime_s) }));
     const p = w.user_id != null ? previews.get(w.user_id) : null;
     const image = !w.minimized && p?.image ? p.image : "";
     img.hidden = !image;
     if (image && img.getAttribute("src") !== image) img.src = image;
     ph.hidden = !!image;
     ph.textContent = w.minimized ? "Minimized" : w.user_id == null ? "No preview for windows Dockie didn't open" : "No preview yet";
-    const bits = [w.mem_bytes != null ? fmtBytes(w.mem_bytes) : null, "Up " + fmtUptime(w.uptime_s), "PID " + w.pid].filter(Boolean);
+    const bits = [w.mem_bytes != null ? fmtBytes(w.mem_bytes) : null, "PID " + w.pid].filter(Boolean);
     meta.replaceChildren(...bits.flatMap((t, i) => [...(i ? [el("span", { className: "sep", textContent: "·" })] : []), el("span", { className: "num", textContent: t })]));
   };
   return { el: card, paint };
 }
 async function renderWindows() {
   let list;
-  try { list = await invoke("roblox_windows"); } catch (e) { return fail(e); }
+  try { list = await invoke("roblox_windows"); } catch { return; } // a background poll: skip a failed round, try again in 2 s
   const pids = new Set(list.map((w) => w.pid));
   for (const [pid, c] of winCards) if (!pids.has(pid)) { c.el.remove(); winCards.delete(pid); }
   for (const w of list) {
@@ -561,6 +559,9 @@ async function renderWindows() {
   const none = !list.length;
   for (const id of ["stats", "windows", "close-all"]) $(id).hidden = none;
   $("win-empty").hidden = !none;
+  uptimes.clear();
+  for (const w of list) if (w.user_id != null) uptimes.set(w.user_id, w.uptime_s);
+  for (const paint of cells.values()) paint();
 }
 
 async function closeAll() {
@@ -593,7 +594,7 @@ $("win-go").addEventListener("click", () => showTab("accounts"));
 for (const id of ["signin", "empty-signin"]) $(id).addEventListener("click", () => signIn(null));
 for (const id of ["paste", "empty-paste"]) $(id).addEventListener("click", openPaste);
 $("launch-sel").addEventListener("click", launchSelected);
-setLabel($("stop-all"), "stop", "Stop all");
+setLabel($("stop-all"), "Stop all");
 $("join-all").addEventListener("keydown", (e) => { if (e.key === "Enter") launchSelected(); });
 $("stop-all").addEventListener("click", async () => {
   await call("stop_all");
@@ -628,5 +629,7 @@ listen("confirm-quit", async () => {
   if (await ask("Roblox windows stay open, but no new extra windows can open until you reopen Dockie. Quit?")) invoke("quit");
 });
 
-window.__TAURI__.app?.getVersion?.().then((v) => ($("version").textContent = "Version " + v)).catch(() => {});
+window.__TAURI__.app?.getVersion?.().then((v) => ($("version").textContent = "Dockie " + v)).catch(() => {});
 refresh().catch(fail);
+renderWindows();
+setInterval(renderWindows, 2000); // window list, memory and time running, for both tabs
