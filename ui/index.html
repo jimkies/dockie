@@ -7,10 +7,12 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="app">
 <!-- Dockie draws its own title bar: empty parts of it drag the window, double-click maximizes. -->
 <header class="top" data-tauri-drag-region>
-  <div class="brand" data-tauri-drag-region><span class="mark" aria-hidden="true" data-tauri-drag-region></span>Dockie</div>
+  <div class="brand" data-tauri-drag-region><svg class="mark" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4.5" width="6.5" height="11" rx="1.5"/><rect x="11" y="4.5" width="6.5" height="11" rx="1.5"/></svg>Dockie</div>
   <nav class="seg" role="tablist" aria-label="Sections">
+    <span class="seg-pill" aria-hidden="true"></span>
     <button role="tab" data-tab="accounts" aria-selected="true">Accounts</button>
     <button role="tab" data-tab="windows" aria-selected="false">Windows</button>
     <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
@@ -50,8 +52,7 @@
       <button id="launch-sel" class="btn primary" disabled>Launch</button>
       <button id="stop-all" class="btn" hidden>Stop all</button>
       <div class="menu-wrap">
-        <button id="add-btn" class="btn" aria-haspopup="menu" aria-expanded="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add account
+        <button id="add-btn" class="btn" aria-haspopup="menu" aria-expanded="false">Add account
         </button>
         <div class="menu right" role="menu">
           <button role="menuitem" id="signin">Sign in with Roblox</button>
@@ -72,9 +73,9 @@
     <div id="grid" class="grid"></div>
 
     <div id="empty" class="empty" hidden>
-      <span class="mark big" aria-hidden="true"></span>
+      <svg class="mark big" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4.5" width="6.5" height="11" rx="1.5"/><rect x="11" y="4.5" width="6.5" height="11" rx="1.5"/></svg>
       <h1>Add your first Roblox account</h1>
-      <p>Sign in once, then open as many accounts side by side as you like.</p>
+      <p>Sign in once, then open as many accounts side by side as you like</p>
       <div class="row">
         <button id="empty-signin" class="btn primary lg">Sign in with Roblox</button>
         <button id="empty-paste" class="btn lg">Paste a cookie</button>
@@ -84,43 +85,50 @@
   </section>
 
   <section id="tab-windows" hidden>
-    <div class="section-head">
-      <h2>Running Roblox windows</h2>
+    <div class="page-head">
+      <h1>Windows</h1>
       <button id="close-all" class="btn">Close all Roblox</button>
     </div>
-    <div id="windows" class="list"></div>
+    <div id="stats" class="stats">
+      <div class="stat"><span class="k">Open</span><span id="stat-count" class="v num">0</span></div>
+      <div class="stat"><span class="k">Memory in use</span><span id="stat-mem" class="v num">–</span></div>
+      <div class="stat"><span class="k">Minimized</span><span id="stat-min" class="v num">0</span></div>
+    </div>
+    <div id="windows" class="grid"></div>
+    <div id="win-empty" class="empty" hidden>
+      <svg class="mark big" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4.5" width="6.5" height="11" rx="1.5"/><rect x="11" y="4.5" width="6.5" height="11" rx="1.5"/></svg>
+      <h1>No Roblox windows open</h1>
+      <p>Launched accounts show up here with a live preview and memory use</p>
+      <div class="row"><button id="win-go" class="btn primary lg">Go to Accounts</button></div>
+    </div>
   </section>
 
   <section id="tab-settings" hidden>
-    <div class="card">
-      <h2>Launching</h2>
-      <div class="setting">
-        <div><label for="set-fps">Default FPS cap</label>
-          <p class="help">Used when an account has no FPS cap of its own. Leave empty and Dockie never touches Roblox's setting.</p></div>
-        <input id="set-fps" class="field num" type="number" min="1" placeholder="None">
-      </div>
+    <div class="page-head"><h1>Settings</h1></div>
+    <h2 class="group">Launching</h2>
+    <div class="set-row">
+      <div><label for="set-fps">Default FPS cap</label>
+        <p class="help">Used when an account has no FPS cap of its own. Leave empty and Dockie never touches Roblox's setting.</p></div>
+      <input id="set-fps" class="field num" type="number" min="1" placeholder="None">
     </div>
-    <div class="card">
-      <h2>Performance</h2>
-      <div class="setting">
-        <div><label for="set-trim">Free RAM from minimized windows</label>
-          <p class="help">Moves the idle memory of minimized Dockie windows to disk. Expect a short stutter when you reopen one.</p></div>
-        <input id="set-trim" class="switch" type="checkbox" role="switch">
-      </div>
+    <h2 class="group">Performance</h2>
+    <div class="set-row">
+      <div><label for="set-trim">Free RAM from minimized windows</label>
+        <p class="help">Moves the idle memory of minimized Dockie windows to disk. Expect a short stutter when you reopen one.</p></div>
+      <input id="set-trim" class="switch" type="checkbox" role="switch">
     </div>
-    <div class="card">
-      <h2>Data</h2>
-      <div class="setting">
-        <div><span class="label">Accounts and settings</span>
-          <p class="help">Stored on this PC, with sign-ins encrypted to your Windows account.</p></div>
-        <button id="open-data" class="btn">Open folder</button>
-      </div>
-      <p id="version" class="help version"></p>
+    <h2 class="group">Data</h2>
+    <div class="set-row">
+      <div><span class="label">Accounts and settings</span>
+        <p id="data-help" class="help">Stored on this PC, with sign-ins encrypted to your Windows account.</p></div>
+      <button id="open-data" class="btn">Open folder</button>
     </div>
+    <p id="version" class="version num"></p>
   </section>
 </main>
 
 <div id="toasts" aria-live="polite"></div>
+</div>
 
 <dialog id="paste-dlg" class="sheet">
   <form method="dialog">

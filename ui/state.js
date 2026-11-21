@@ -24,4 +24,19 @@ function searchPlan(text) {
   return { query: t, follow: /^[A-Za-z0-9_]{3,20}$/.test(t) ? t : null };
 }
 
-if (typeof module !== "undefined") module.exports = { tileState, warnText, searchPlan };
+// Windows tab: memory and time running, short and readable.
+function fmtBytes(n) {
+  const mb = n / 2 ** 20;
+  return mb < 1000 ? `${Math.round(mb)} MB` : `${(mb / 1024).toFixed(1)} GB`;
+}
+function fmtUptime(s) {
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
+// Which way a tab switch moves: 1 = to a tab on the right, -1 = left.
+const TABS = ["accounts", "windows", "settings"];
+const tabStep = (from, to) => Math.sign(TABS.indexOf(to) - TABS.indexOf(from));
+
+if (typeof module !== "undefined") module.exports = { tileState, warnText, searchPlan, fmtBytes, fmtUptime, tabStep };
