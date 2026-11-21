@@ -30,7 +30,7 @@ function svg(d) {
 function toast(message) {
   const t = el("div", { className: "toast", textContent: message });
   $("toasts").append(t);
-  setTimeout(() => t.remove(), 5000);
+  setTimeout(() => t.animate([{}, { opacity: 0, translate: "0 4px" }], { duration: 150, easing: "ease-out" }).finished.then(() => t.remove()), 5000);
 }
 const fail = (e) => toast(String(e));
 const call = (cmd, args) => invoke(cmd, args).catch(fail);
@@ -49,13 +49,34 @@ document.addEventListener("click", (e) => {
     const menu = trigger.nextElementSibling;
     const open = !menu.classList.contains("open");
     closeMenus(menu);
+    if (open) {
+      // open upward when there's no room below (bottom row of tiles)
+      menu.classList.remove("up");
+      const floor = (menu.closest("main") ?? document.body).getBoundingClientRect().bottom;
+      menu.classList.toggle("up", menu.getBoundingClientRect().bottom > floor - 8);
+    }
     menu.classList.toggle("open", open);
     trigger.setAttribute("aria-expanded", String(open));
+    if (open && e.detail === 0) menu.querySelector("[role=menuitem]")?.focus(); // opened from the keyboard
     return;
   }
   closeMenus(); // any other click, including a menu item, closes menus
 });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+document.addEventListener("keydown", (e) => {
+  const menu = document.activeElement?.closest(".menu.open");
+  if (e.key === "Escape") {
+    menu?.previousElementSibling.focus(); // back to the button that opened it
+    return closeMenus();
+  }
+  if (!menu) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const items = [...menu.querySelectorAll("[role=menuitem]")];
+    const i = items.indexOf(document.activeElement) + (e.key === "ArrowDown" ? 1 : -1);
+    items[(i + items.length) % items.length].focus();
+  } else if (e.key === "Tab") closeMenus();
+});
+const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // ---- window frame: Windows' title bar is off, so these buttons stand in for it ----
 const appWindow = window.__TAURI__.window.getCurrentWindow();
@@ -210,6 +231,10 @@ function renderTile(a, i) {
   paint();
 
   tile.append(shot, body, meta, err);
+  // Clicking the card ticks it. Its buttons, checkbox and menu keep their own jobs; a running preview focuses its window.
+  tile.addEventListener("click", (e) => {
+    if (!e.target.closest("button:not(:disabled), input, label, .menu-wrap")) check.click();
+  });
   return tile;
 }
 
@@ -251,7 +276,7 @@ function unqueue(id) {
 
 function launchSelected() {
   const userIds = [...selected];
-  if (!userIds.length) return;
+  if (!userIds.length) return toast("Tick the accounts you want to launch first.");
   call("launch", { userIds, target: $("join-all").value.trim() || null });
 }
 
@@ -361,8 +386,11 @@ function describeEditJoin() {
   clearTimeout(describeTimer);
   if (!text.trim()) return;
   describeTimer = setTimeout(async () => {
-    try { label.textContent = await invoke("describe_join", { userId: editing_acc.user_id, text }); }
-    catch (e) { label.textContent = String(e); label.className = "help bad"; }
+    let l, bad = false;
+    try { l = await invoke("describe_join", { userId: editing_acc.user_id, text }); } catch (e) { l = String(e); bad = true; }
+    if ($("edit-join").value !== text) return; // a slow answer for text that's since changed
+    label.textContent = l;
+    label.className = bad ? "help bad" : "help";
   }, 300);
 }
 function openEdit(a) {
@@ -394,7 +422,7 @@ $("edit-save").addEventListener("click", async (e) => {
     } catch (err) {
       $("edit-join-label").textContent = String(err);
       $("edit-join-label").className = "help bad";
-      $("edit-join").animate([{ translate: "0" }, { translate: "-8px" }, { translate: "8px" }, { translate: "-5px" }, { translate: "5px" }, { translate: "-2px" }, { translate: "0" }], { duration: 360, easing: "ease-out" });
+      if (!reduceMotion()) $("edit-join").animate([{ translate: "0" }, { translate: "-8px" }, { translate: "8px" }, { translate: "-5px" }, { translate: "5px" }, { translate: "-2px" }, { translate: "0" }], { duration: 360, easing: "ease-out" });
       $("edit-join").focus();
       return;
     }
