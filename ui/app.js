@@ -507,24 +507,60 @@ $("paste-dlg").addEventListener("close", async () => {
   refresh().catch(fail);
 });
 
-// ---- windows ----
+// ---- windows: one card per process, updated in place so the 2 s poll never flickers or steals focus ----
+const winCards = new Map(); // pid -> { el, paint }
+function winCard(pid) {
+  const img = el("img", { alt: "" });
+  const ph = el("span", { className: "ph" });
+  const pill = el("span", { className: "pill" });
+  const shot = el("div", { className: "shot" }, el("div", { className: "thumb" }, img, ph), pill);
+  const av = el("div", {});
+  const name = el("div", { className: "name" });
+  const sub = el("div", { className: "handle" });
+  const focusBtn = el("button", { className: "btn sm", textContent: "Focus" });
+  focusBtn.addEventListener("click", () => call("focus_pid", { pid }));
+  const close = el("button", { className: "btn sm danger", textContent: "Close" });
+  close.addEventListener("click", () => call("close_pid", { pid }).then(renderWindows));
+  const meta = el("div", { className: "meta" });
+  const card = el("article", { className: "tile enter" }, shot, el("div", { className: "body" }, av, el("div", { className: "who" }, name, sub), focusBtn, close), meta);
+  card.dataset.pid = pid;
+  let face; // whose avatar is showing, so it's only rebuilt when that changes
+  const paint = (w) => {
+    const a = snap?.accounts.find((x) => x.user_id === w.user_id);
+    const key = a ? `${a.user_id}|${a.avatar_url}` : "none";
+    if (face !== key) { face = key; av.replaceChildren(a ? avatar(a) : el("div", { className: "av" }, svg(GAMEPAD))); }
+    name.textContent = a ? a.display_name : w.title || "Roblox";
+    sub.textContent = a ? "@" + a.username : w.user_id != null ? "Opened by Dockie" : "Not opened by Dockie";
+    pill.className = "pill " + (w.minimized ? "busy" : "ok");
+    pill.textContent = w.minimized ? "Minimized" : "Running";
+    const p = w.user_id != null ? previews.get(w.user_id) : null;
+    const image = !w.minimized && p?.image ? p.image : "";
+    img.hidden = !image;
+    if (image && img.getAttribute("src") !== image) img.src = image;
+    ph.hidden = !!image;
+    ph.textContent = w.minimized ? "Minimized" : w.user_id == null ? "No preview for windows Dockie didn't open" : "No preview yet";
+    const bits = [w.mem_bytes != null ? fmtBytes(w.mem_bytes) : null, "Up " + fmtUptime(w.uptime_s), "PID " + w.pid].filter(Boolean);
+    meta.replaceChildren(...bits.flatMap((t, i) => [...(i ? [el("span", { className: "sep", textContent: "·" })] : []), el("span", { className: "num", textContent: t })]));
+  };
+  return { el: card, paint };
+}
 async function renderWindows() {
   let list;
   try { list = await invoke("roblox_windows"); } catch (e) { return fail(e); }
-  const names = new Map((snap?.accounts || []).map((a) => [a.user_id, a.username]));
-  const rows = list.map((w) => {
-    const focusBtn = el("button", { className: "btn sm", textContent: "Focus" });
-    focusBtn.addEventListener("click", () => call("focus_pid", { pid: w.pid }));
-    const close = el("button", { className: "btn sm danger", textContent: "Close" });
-    close.addEventListener("click", () => call("close_pid", { pid: w.pid }).then(renderWindows));
-    const who = w.user_id != null ? "@" + (names.get(w.user_id) ?? w.user_id) : "Not from Dockie";
-    return el("div", { className: "win" },
-      el("div", {},
-        el("div", { className: "t", textContent: w.title || "Roblox" }),
-        el("div", { className: "s" }, who + " · ", el("span", { className: "num", textContent: `PID ${w.pid}` }))),
-      el("div", { className: "acts" }, focusBtn, close));
-  });
-  $("windows").replaceChildren(...(rows.length ? rows : [el("div", { className: "none", textContent: "No Roblox windows are open." })]));
+  const pids = new Set(list.map((w) => w.pid));
+  for (const [pid, c] of winCards) if (!pids.has(pid)) { c.el.remove(); winCards.delete(pid); }
+  for (const w of list) {
+    let c = winCards.get(w.pid);
+    if (!c) { c = winCard(w.pid); winCards.set(w.pid, c); $("windows").append(c.el); }
+    c.paint(w);
+  }
+  const known = list.filter((w) => w.mem_bytes != null); // memory Windows wouldn't report is left out, not counted as 0
+  $("stat-count").textContent = list.length;
+  $("stat-mem").textContent = known.length ? fmtBytes(known.reduce((s, w) => s + w.mem_bytes, 0)) : "–";
+  $("stat-min").textContent = list.filter((w) => w.minimized).length;
+  const none = !list.length;
+  for (const id of ["stats", "windows", "close-all"]) $(id).hidden = none;
+  $("win-empty").hidden = !none;
 }
 
 async function closeAll() {
@@ -541,6 +577,8 @@ async function closeAll() {
 function renderSettings() {
   $("set-fps").value = snap.settings.fps_cap_default ?? "";
   $("set-trim").checked = snap.settings.trim_minimized;
+  const n = snap.accounts.length;
+  $("data-help").textContent = `${n} account${n === 1 ? "" : "s"} saved on this PC. Sign-ins are encrypted to your Windows account.`;
 }
 function saveSettings() {
   const v = $("set-fps").value;
@@ -551,6 +589,7 @@ function saveSettings() {
 for (const b of document.querySelectorAll("[role=tab]")) b.addEventListener("click", () => showTab(b.dataset.tab));
 $("warn-close").addEventListener("click", closeAll);
 $("close-all").addEventListener("click", closeAll);
+$("win-go").addEventListener("click", () => showTab("accounts"));
 for (const id of ["signin", "empty-signin"]) $(id).addEventListener("click", () => signIn(null));
 for (const id of ["paste", "empty-paste"]) $(id).addEventListener("click", openPaste);
 $("launch-sel").addEventListener("click", launchSelected);
@@ -589,5 +628,5 @@ listen("confirm-quit", async () => {
   if (await ask("Roblox windows stay open, but no new extra windows can open until you reopen Dockie. Quit?")) invoke("quit");
 });
 
-window.__TAURI__.app?.getVersion?.().then((v) => ($("version").textContent = "Dockie " + v)).catch(() => {});
+window.__TAURI__.app?.getVersion?.().then((v) => ($("version").textContent = "Version " + v)).catch(() => {});
 refresh().catch(fail);

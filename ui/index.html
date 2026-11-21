@@ -85,38 +85,57 @@
   </section>
 
   <section id="tab-windows" hidden>
-    <div class="section-head">
-      <h2>Running Roblox windows</h2>
+    <div class="page-head">
+      <div><h1>Windows</h1><p class="help">Every Roblox window on this PC, and what it's using.</p></div>
       <button id="close-all" class="btn">Close all Roblox</button>
     </div>
-    <div id="windows" class="list"></div>
+    <div id="stats" class="stats">
+      <div class="stat"><span class="k">Open</span><span id="stat-count" class="v num">0</span></div>
+      <div class="stat"><span class="k">Memory in use</span><span id="stat-mem" class="v num">–</span></div>
+      <div class="stat"><span class="k">Minimized</span><span id="stat-min" class="v num">0</span></div>
+    </div>
+    <div id="windows" class="grid"></div>
+    <div id="win-empty" class="empty" hidden>
+      <span class="empty-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM3 9h18M6 7h.01M8.5 7h.01"/></svg></span>
+      <h1>No Roblox windows open</h1>
+      <p>Launch accounts and their windows show up here, with live previews and memory use.</p>
+      <div class="row"><button id="win-go" class="btn primary lg">Go to Accounts</button></div>
+    </div>
   </section>
 
   <section id="tab-settings" hidden>
-    <div class="card">
-      <h2>Launching</h2>
-      <div class="setting">
-        <div><label for="set-fps">Default FPS cap</label>
-          <p class="help">Used when an account has no FPS cap of its own. Leave empty and Dockie never touches Roblox's setting.</p></div>
-        <input id="set-fps" class="field num" type="number" min="1" placeholder="None">
-      </div>
+    <div class="page-head">
+      <div><h1>Settings</h1><p class="help">How Dockie launches Roblox and looks after its windows.</p></div>
     </div>
-    <div class="card">
-      <h2>Performance</h2>
-      <div class="setting">
-        <div><label for="set-trim">Free RAM from minimized windows</label>
-          <p class="help">Moves the idle memory of minimized Dockie windows to disk. Expect a short stutter when you reopen one.</p></div>
-        <input id="set-trim" class="switch" type="checkbox" role="switch">
+    <div class="cards">
+      <div class="card about">
+        <div class="card-head"><span class="mark big" aria-hidden="true"></span><div><h2>Dockie</h2><p id="version" class="help"></p></div></div>
+        <p class="help">Open several Roblox accounts side by side, each in its own window.</p>
       </div>
-    </div>
-    <div class="card">
-      <h2>Data</h2>
-      <div class="setting">
-        <div><span class="label">Accounts and settings</span>
-          <p class="help">Stored on this PC, with sign-ins encrypted to your Windows account.</p></div>
-        <button id="open-data" class="btn">Open folder</button>
+      <div class="card">
+        <div class="card-head"><span class="badge" style="--h: 285" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 14l4-4M3.3 19a10 10 0 1 1 17.4 0"/></svg></span><h2>Launching</h2></div>
+        <div class="setting">
+          <div><label for="set-fps">Default FPS cap</label>
+            <p class="help">Used when an account has no FPS cap of its own. Leave empty and Dockie never touches Roblox's setting.</p></div>
+          <input id="set-fps" class="field num" type="number" min="1" placeholder="None">
+        </div>
       </div>
-      <p id="version" class="help version"></p>
+      <div class="card">
+        <div class="card-head"><span class="badge" style="--h: 150" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/></svg></span><h2>Performance</h2></div>
+        <div class="setting">
+          <div><label for="set-trim">Free RAM from minimized windows</label>
+            <p class="help">Moves the idle memory of minimized Dockie windows to disk. Expect a short stutter when you reopen one.</p></div>
+          <input id="set-trim" class="switch" type="checkbox" role="switch">
+        </div>
+      </div>
+      <div class="card wide">
+        <div class="card-head"><span class="badge" style="--h: 80" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg></span><h2>Data</h2></div>
+        <div class="setting">
+          <div><span class="label">Accounts and settings</span>
+            <p id="data-help" class="help">Stored on this PC, with sign-ins encrypted to your Windows account.</p></div>
+          <button id="open-data" class="btn">Open folder</button>
+        </div>
+      </div>
     </div>
   </section>
 </main>
