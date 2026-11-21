@@ -1,54 +1,87 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use image::{codecs::jpeg::JpegEncoder, imageops::{self, FilterType}, RgbImage};
-use windows::Win32::Foundation::{HWND, RECT};
-use windows::Win32::Graphics::Gdi::*;
-use windows::Win32::Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow};
-use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+use std::{cell::RefCell, thread::sleep, time::Duration};
+use windows::core::Interface;
+use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureAccess, GraphicsCaptureAccessKind, GraphicsCaptureItem};
+use windows::Graphics::DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat};
+use windows::Win32::Foundation::{HMODULE, HWND};
+use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
+use windows::Win32::Graphics::Direct3D11::*;
+use windows::Win32::Graphics::Dxgi::IDXGIDevice;
+use windows::Win32::System::WinRT::Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess};
+use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 
 const WIDTH: u32 = 240;
 const MIN_MINIMIZED: u64 = 10;
 const TRIM_EVERY: u64 = 300;
 
-/// Client area of `hwnd` as a 240px-wide JPEG data URL.
-pub fn capture_data_url(hwnd: isize) -> Result<String> {
-  let hwnd = HWND(hwnd as *mut _);
-  let mut rect = RECT::default();
-  unsafe { GetClientRect(hwnd, &mut rect)? };
-  let (w, h) = (rect.right - rect.left, rect.bottom - rect.top);
-  if w <= 0 || h <= 0 {
-    bail!("empty window");
+#[derive(Clone)]
+struct Gpu { device: ID3D11Device, ctx: ID3D11DeviceContext, winrt: IDirect3DDevice }
+
+thread_local! { static GPU: RefCell<Option<Gpu>> = const { RefCell::new(None) }; }
+
+fn gpu() -> Result<Gpu> {
+  GPU.with(|g| {
+    if let Some(gpu) = g.borrow().as_ref() {
+      return Ok(gpu.clone());
+    }
+    let (mut device, mut ctx) = (None, None);
+    unsafe { D3D11CreateDevice(None, D3D_DRIVER_TYPE_HARDWARE, HMODULE::default(), D3D11_CREATE_DEVICE_BGRA_SUPPORT, None, D3D11_SDK_VERSION, Some(&mut device), None, Some(&mut ctx))? };
+    let device: ID3D11Device = device.context("no D3D11 device")?;
+    let winrt: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&device.cast::<IDXGIDevice>()?)? }.cast()?;
+    // Without this, Windows draws a yellow capture border around the Roblox window.
+    let _ = GraphicsCaptureAccess::RequestAccessAsync(GraphicsCaptureAccessKind::Borderless).and_then(|op| op.join());
+    let gpu = Gpu { device, ctx: ctx.context("no D3D11 context")?, winrt };
+    *g.borrow_mut() = Some(gpu.clone());
+    Ok(gpu)
+  })
+}
+
+/// One BGRA frame of `hwnd` via Windows.Graphics.Capture. PrintWindow made the whole screen flash on Roblox.
+fn grab(hwnd: HWND) -> Result<(u32, u32, Vec<u8>)> {
+  let gpu = gpu()?;
+  let item: GraphicsCaptureItem = unsafe { windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?.CreateForWindow(hwnd)? };
+  let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(&gpu.winrt, DirectXPixelFormat::B8G8R8A8UIntNormalized, 1, item.Size()?)?;
+  let session = pool.CreateCaptureSession(&item)?;
+  let _ = session.SetIsBorderRequired(false);
+  let _ = session.SetIsCursorCaptureEnabled(false);
+  session.StartCapture()?;
+  let frame = (0..50).find_map(|_| pool.TryGetNextFrame().ok().or_else(|| { sleep(Duration::from_millis(10)); None }));
+  let _ = session.Close();
+  let frame = frame.context("no frame")?;
+  let tex: ID3D11Texture2D = unsafe { frame.Surface()?.cast::<IDirect3DDxgiInterfaceAccess>()?.GetInterface()? };
+  let mut desc = D3D11_TEXTURE2D_DESC::default();
+  unsafe { tex.GetDesc(&mut desc) };
+  desc.Usage = D3D11_USAGE_STAGING;
+  desc.BindFlags = 0;
+  desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+  desc.MiscFlags = 0;
+  let mut staging = None;
+  unsafe { gpu.device.CreateTexture2D(&desc, None, Some(&mut staging))? };
+  let staging = staging.context("no staging texture")?;
+  let mut map = D3D11_MAPPED_SUBRESOURCE::default();
+  let (w, h) = (desc.Width, desc.Height);
+  let mut bgra = Vec::with_capacity(w as usize * h as usize * 4);
+  // SAFETY: the mapped rows are RowPitch apart and each holds at least w*4 bytes; unmapped before returning.
+  unsafe {
+    gpu.ctx.CopyResource(&staging, &tex);
+    gpu.ctx.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut map))?;
+    for y in 0..h as usize {
+      bgra.extend_from_slice(std::slice::from_raw_parts((map.pData as *const u8).add(y * map.RowPitch as usize), w as usize * 4));
+    }
+    gpu.ctx.Unmap(&staging, 0);
   }
-  let mut bgra = vec![0u8; w as usize * h as usize * 4];
-  // SAFETY: every GDI object created here is released below on all paths.
-  let ok = unsafe {
-    let screen = GetDC(None);
-    let dc = CreateCompatibleDC(Some(screen));
-    let bmp = CreateCompatibleBitmap(screen, w, h);
-    let old = SelectObject(dc, bmp.into());
-    // 2 = PW_RENDERFULLCONTENT, so GPU-drawn windows render too
-    let printed = PrintWindow(hwnd, dc, PRINT_WINDOW_FLAGS(2)).as_bool();
-    let mut bi = BITMAPINFO {
-      bmiHeader: BITMAPINFOHEADER {
-        biSize: size_of::<BITMAPINFOHEADER>() as u32,
-        biWidth: w,
-        biHeight: -h, // negative = top-down
-        biPlanes: 1,
-        biBitCount: 32,
-        biCompression: BI_RGB.0,
-        ..Default::default()
-      },
-      ..Default::default()
-    };
-    let lines = GetDIBits(dc, bmp, 0, h as u32, Some(bgra.as_mut_ptr().cast()), &mut bi, DIB_RGB_COLORS);
-    SelectObject(dc, old);
-    let _ = DeleteObject(bmp.into());
-    let _ = DeleteDC(dc);
-    ReleaseDC(None, screen);
-    printed && lines != 0
-  };
-  if !ok {
-    bail!("capture failed");
+  let _ = frame.Close();
+  let _ = pool.Close();
+  Ok((w, h, bgra))
+}
+
+/// Window `hwnd` as a 240px-wide JPEG data URL.
+pub fn capture_data_url(hwnd: isize) -> Result<String> {
+  let (w, h, bgra) = grab(HWND(hwnd as *mut _))?;
+  if w == 0 || h == 0 {
+    bail!("empty window");
   }
   let rgb: Vec<u8> = bgra.chunks_exact(4).flat_map(|p| [p[2], p[1], p[0]]).collect();
   if is_black(&rgb) {
@@ -61,7 +94,7 @@ pub fn capture_data_url(hwnd: isize) -> Result<String> {
   Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(jpeg)))
 }
 
-/// Every byte near zero: PrintWindow returned nothing drawn.
+/// Every byte near zero: the capture returned nothing drawn.
 pub fn is_black(rgb: &[u8]) -> bool {
   rgb.iter().all(|&b| b < 8)
 }

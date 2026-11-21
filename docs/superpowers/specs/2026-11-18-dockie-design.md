@@ -219,7 +219,7 @@ Needs sign-in · Roblox isn't installed · Couldn't get a launch ticket (with Ro
 - **#2 PlaceLauncher host:** `assetgame.roblox.com` works. Joining by place id and following a user both launched into the game.
 - **#3 window ownership:** the spawned pid owns the window. Process start times read fine (no 0s).
 - **#4 FPS values:** Roblox writes `-1` for Unlimited. An override of 60 was written before launch, restored to the user's `-1` about 4.5 s later, and restored again when the window closed normally (Roblox writes its cap on exit). The value set beyond 60 / -1 is still untested, so the number box stays.
-- **#5 previews:** PrintWindow captures the real Roblox UI, not black. "minimized" shows for minimized windows.
+- **#5 previews:** PrintWindow (`PW_RENDERFULLCONTENT`) captured Roblox but made the whole screen flash on every capture, which was confirmed by running the capture alone with Dockie closed. Previews now use Windows.Graphics.Capture with a borderless session: no flash and no yellow border on Windows 11. "minimized" shows for minimized windows.
 - **#6 titles:** `Roblox · <username>` stays set, with no visible flicker.
 - **#7 imported accounts:** an export imported into an empty data folder on the same PC checks as valid. A different PC or network is still untested.
 - **#9 freeing RAM:** allowed by Roblox. Minimized windows went from about 1.6 GB to about 0.3 GB, and grew back about 150 MB per minute.
