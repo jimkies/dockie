@@ -134,7 +134,12 @@ Test window (a WinForms window made by a scratch script), Alt+Tab captured with 
 - (a) `WS_EX_TOOLWINDOW`, `WS_EX_APPWINDOW` cleared: gone from Alt+Tab.
 - (b) `WS_EX_TOOLWINDOW | WS_EX_APPWINDOW`: still in Alt+Tab. (b) fails, as Raymond Chen's rules predict.
 
-Taskbar side of (a) with `AddTab`: (filled in after the Rust build)
+Implemented: (a) only, in `winstyle::ensure` (one function for both executor and account windows; accounts
+also get `AddTab`). Taskbar side of (a) is untested: after the grill Jimmy asked that nothing on his PC be run
+or touched, so he tests it. Expected quirks to check: Dockie hides then re-shows the window to make the shell
+re-read its style, so the Roblox window briefly blinks and loses focus when the toggle turns on (and again if
+Roblox ever resets its style); the taskbar button may show a generic icon; a minimized tool window may sit
+above the taskbar instead of folding into its button.
 
 ## Still open
 
