@@ -101,7 +101,8 @@ pub fn set_settings(app: AppHandle, settings: Settings) -> Res<()> {
     *s = settings;
   }
   crate::executor::deploy_script(&app);
-  Ok(())
+  let port = ctx.settings.lock().unwrap().ws_port;
+  ctx.attach.listen(port)
 }
 
 #[tauri::command]

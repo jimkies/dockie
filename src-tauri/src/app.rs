@@ -17,6 +17,7 @@ pub struct AppCtx {
   pub lock: Mutex<Option<MultiLock>>,
   pub launching: AtomicBool,
   pub labels: Mutex<HashMap<String, String>>,
+  pub attach: crate::attach::Server,
   // set when accounts.json was unreadable; we must not overwrite it
   pub load_err: Option<String>,
 }
@@ -38,6 +39,7 @@ impl AppCtx {
       lock: Mutex::new(None),
       launching: AtomicBool::new(false),
       labels: Mutex::new(HashMap::new()),
+      attach: Default::default(),
       load_err,
     }
   }

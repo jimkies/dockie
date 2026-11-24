@@ -1,4 +1,5 @@
 pub mod app;
+pub mod attach;
 pub mod commands;
 pub mod dpapi;
 pub mod executor;
@@ -42,6 +43,15 @@ pub fn run() {
       app.manage(launcher::Launcher::start(app.handle().clone()));
       tauri::async_runtime::spawn(app::check_all(app.handle().clone()));
       executor::deploy_script(app.handle());
+      let port = app.state::<app::AppCtx>().settings.lock().unwrap().ws_port;
+      if let Err(m) = app.state::<app::AppCtx>().attach.listen(port) {
+        let h = app.handle().clone();
+        // the window's listener isn't up yet during setup
+        tauri::async_runtime::spawn(async move {
+          tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+          let _ = h.emit("notice", serde_json::json!({ "message": m }));
+        });
+      }
       let h = app.handle().clone();
       tauri::async_runtime::spawn(async move { executor::autostart(&h).await });
       ticker::start(app.handle().clone());
