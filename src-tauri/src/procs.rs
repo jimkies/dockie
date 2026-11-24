@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use windows::core::{BOOL, PCWSTR};
@@ -72,7 +72,26 @@ pub fn roblox_exe() -> Result<PathBuf> {
       return r;
     }
   }
-  bail!("Roblox isn't installed")
+  // The roblox-player link can go missing (another launcher's uninstaller removes it) while Roblox
+  // itself is still installed, so look in its install folders too.
+  let dirs: Vec<PathBuf> = ["LOCALAPPDATA", "ProgramFiles(x86)", "ProgramFiles"]
+    .iter()
+    .filter_map(|k| std::env::var_os(k).map(|d| PathBuf::from(d).join("Roblox").join("Versions")))
+    .collect();
+  newest_player(&dirs).ok_or_else(|| anyhow!("Roblox isn't installed"))
+}
+
+/// The most recently updated RobloxPlayerBeta.exe in any version folder under these directories.
+fn newest_player(dirs: &[PathBuf]) -> Option<PathBuf> {
+  dirs
+    .iter()
+    .filter_map(|d| std::fs::read_dir(d).ok())
+    .flatten()
+    .flatten()
+    .map(|v| v.path().join("RobloxPlayerBeta.exe"))
+    .filter_map(|p| Some((p.metadata().ok()?.modified().ok()?, p)))
+    .max_by_key(|(t, _)| *t)
+    .map(|(_, p)| p)
 }
 
 fn created(pid: u32) -> u64 {
@@ -383,6 +402,24 @@ mod tests {
     let lock = acquire_lock(&m, &e);
     unsafe { let _ = CloseHandle(squatter); }
     assert!(lock.is_ok(), "{:?}", lock.err());
+  }
+
+  #[test]
+  fn finds_newest_player_without_the_registry_link() {
+    let root = std::env::temp_dir().join(format!("dockie_versions_{}", std::process::id()));
+    let versions = root.join("Versions");
+    let make = |v: &str, secs: u64| {
+      let d = versions.join(v);
+      std::fs::create_dir_all(&d).unwrap();
+      let f = std::fs::File::create(d.join("RobloxPlayerBeta.exe")).unwrap();
+      f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs)).unwrap();
+    };
+    make("version-old", 1_700_000_000);
+    make("version-new", 1_800_000_000);
+    std::fs::create_dir_all(versions.join("version-empty")).unwrap(); // no player in it
+    let found = newest_player(&[versions.clone(), root.join("missing")]);
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(found, Some(versions.join("version-new").join("RobloxPlayerBeta.exe")));
   }
 
   #[test]
