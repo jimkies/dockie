@@ -134,10 +134,11 @@
   <form method="dialog">
     <h2>Paste a cookie</h2>
     <p class="help">Paste an account's <code>.ROBLOSECURITY</code> cookie. Dockie checks it with Roblox before saving.</p>
-    <textarea id="paste-text" class="field" rows="5" aria-label=".ROBLOSECURITY cookie"></textarea>
+    <textarea id="paste-text" class="field" rows="5" aria-label=".ROBLOSECURITY cookie" aria-describedby="paste-err"></textarea>
+    <p id="paste-err" class="help bad" aria-live="polite" hidden></p>
     <div class="actions">
       <button class="btn" value="cancel">Cancel</button>
-      <button class="btn primary" value="ok">Add account</button>
+      <button id="paste-ok" class="btn primary" value="ok">Add account</button>
     </div>
   </form>
 </dialog>
