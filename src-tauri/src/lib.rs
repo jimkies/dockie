@@ -2,6 +2,7 @@ pub mod app;
 pub mod attach;
 pub mod commands;
 pub mod dpapi;
+pub mod exec_tray;
 pub mod executor;
 pub mod fps;
 pub mod join;
@@ -14,6 +15,7 @@ pub mod roblox_api;
 pub mod store;
 pub mod ticker;
 pub mod transfer;
+pub mod winstyle;
 
 use tauri::{Emitter, Manager};
 
@@ -38,6 +40,9 @@ pub fn run() {
       logfile::log("Dockie started");
       let ctx = app::AppCtx::new(dir);
       *ctx.lock.lock().unwrap() = procs::take_lock(procs::LOCK_NAMES.0, procs::LOCK_NAMES.1).ok();
+      // windows Dockie changed before a crash go back to normal first
+      winstyle::restore_all(&ctx, false);
+      winstyle::resume();
       ticker::reconcile(&ctx);
       app.manage(ctx);
       app.manage(launcher::Launcher::start(app.handle().clone()));
@@ -54,7 +59,17 @@ pub fn run() {
       }
       let h = app.handle().clone();
       tauri::async_runtime::spawn(async move { executor::autostart(&h).await });
+      exec_tray::start(app.handle())?;
       ticker::start(app.handle().clone());
+      // a panic on the main thread ends Dockie: put windows back first (the ticker catches its own panics)
+      let h = app.handle().clone();
+      let default_hook = std::panic::take_hook();
+      std::panic::set_hook(Box::new(move |info| {
+        if std::thread::current().name() == Some("main") {
+          winstyle::restore_all(&h.state::<app::AppCtx>(), true);
+        }
+        default_hook(info);
+      }));
       Ok(())
     })
     .on_window_event(|window, event| {
@@ -92,6 +107,13 @@ pub fn run() {
       commands::close_all_roblox,
       quit,
     ])
-    .run(tauri::generate_context!())
-    .expect("error while building tauri application");
+    .build(tauri::generate_context!())
+    .expect("error while building tauri application")
+    .run(|app, e| {
+      if let tauri::RunEvent::Exit = e {
+        logfile::log("Dockie exiting: restoring windows");
+        winstyle::restore_all(&app.state::<app::AppCtx>(), false);
+        exec_tray::stop(app);
+      }
+    });
 }
