@@ -52,6 +52,16 @@ function setLabel(btn, text) {
   old.animate(fade(1, 0), { duration: 150, easing: "ease-out" }).finished.then(() => old.remove(), () => old.remove());
 }
 const call = (cmd, args) => invoke(cmd, args).catch(fail);
+// A rejected field shakes, so the error is felt where it happened, not only read in a toast.
+function shake(field) {
+  if (reduceMotion()) return;
+  field.animate([{ translate: "0" }, { translate: "-8px" }, { translate: "8px" }, { translate: "-5px" }, { translate: "5px" }, { translate: "-2px" }, { translate: "0" }], { duration: 360, easing: "ease-out" });
+}
+// Ends an add on a win: say who was added, not just redraw the grid.
+function added(r) {
+  if (r.was_other_account) toast("Signed in as a different account — added it as a new one");
+  else toast(r.replaced ? `Signed in again as @${r.username}` : `Added @${r.username}`);
+}
 
 // ---- menus: a trigger with aria-haspopup opens the .menu next to it ----
 function closeMenus(except) {
@@ -310,8 +320,7 @@ function updateToolbar() {
 
 async function signIn(refreshUserId) {
   try {
-    const r = await invoke("begin_login", { refreshUserId });
-    if (r.was_other_account) toast("Signed in as a different account — added it as a new one");
+    added(await invoke("begin_login", { refreshUserId }));
   } catch (e) {
     if (!String(e).includes("cancelled")) fail(e);
   }
@@ -480,7 +489,7 @@ $("edit-save").addEventListener("click", async (e) => {
     } catch (err) {
       $("edit-join-label").textContent = searchPlan(join) && !searchPlan(join).follow ? PICK_HINT : String(err);
       $("edit-join-label").className = "help bad";
-      if (!reduceMotion()) $("edit-join").animate([{ translate: "0" }, { translate: "-8px" }, { translate: "8px" }, { translate: "-5px" }, { translate: "5px" }, { translate: "-2px" }, { translate: "0" }], { duration: 360, easing: "ease-out" });
+      shake($("edit-join"));
       $("edit-join").focus();
       return;
     }
@@ -491,19 +500,41 @@ $("edit-save").addEventListener("click", async (e) => {
   refresh().catch(fail);
 });
 
-// ---- paste a cookie ----
+// ---- paste a cookie: the sheet stays open while Roblox checks it, and a bad cookie shakes the box ----
 function openPaste() {
-  $("paste-dlg").returnValue = "";
   $("paste-text").value = "";
+  $("paste-err").hidden = true;
+  $("paste-ok").disabled = false;
+  setLabel($("paste-ok"), "Add account");
   $("paste-dlg").showModal();
 }
-$("paste-dlg").addEventListener("close", async () => {
+function pasteError(text) {
+  $("paste-err").textContent = text;
+  $("paste-err").hidden = false;
+  shake($("paste-text"));
+  $("paste-text").focus();
+}
+$("paste-text").addEventListener("input", () => ($("paste-err").hidden = true));
+$("paste-ok").addEventListener("click", async (e) => {
+  e.preventDefault(); // close only once the cookie is saved
   const cookie = $("paste-text").value.trim();
-  $("paste-text").value = "";
-  if ($("paste-dlg").returnValue !== "ok" || !cookie) return;
-  try { await invoke("add_cookie", { cookie }); } catch (e) { fail(e); }
-  refresh().catch(fail);
+  if (!cookie) return pasteError("Paste a cookie first.");
+  $("paste-ok").disabled = true;
+  setLabel($("paste-ok"), "Checking…");
+  try {
+    const r = await invoke("add_cookie", { cookie });
+    $("paste-dlg").close();
+    $("paste-text").value = "";
+    added(r);
+    refresh().catch(fail);
+  } catch (err) {
+    pasteError(String(err));
+  } finally {
+    $("paste-ok").disabled = false;
+    setLabel($("paste-ok"), "Add account");
+  }
 });
+$("paste-dlg").addEventListener("close", () => ($("paste-text").value = "")); // never keep a cookie around after Cancel or Esc
 
 // ---- windows: one card per process, updated in place so the 2 s poll never flickers or steals focus ----
 const winCards = new Map(); // pid -> { el, paint }
