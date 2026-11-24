@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use std::path::{Path, PathBuf};
 use windows::core::{BOOL, PCWSTR};
-use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, FILETIME, HANDLE, HWND, LPARAM};
+use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_INVALID_HANDLE, FILETIME, HANDLE, HWND, LPARAM};
 use windows::Win32::System::Diagnostics::ToolHelp::{
   CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
@@ -211,7 +211,8 @@ pub fn trim(pid: u32) -> Result<()> {
   }
 }
 
-pub struct MultiLock(HANDLE, HANDLE);
+/// The mutex, and the event when we created it (None when another tool already holds the event's name).
+pub struct MultiLock(HANDLE, Option<HANDLE>);
 
 // kernel handles may be closed from any thread
 unsafe impl Send for MultiLock {}
@@ -220,7 +221,9 @@ impl Drop for MultiLock {
   fn drop(&mut self) {
     unsafe {
       let _ = CloseHandle(self.0);
-      let _ = CloseHandle(self.1);
+      if let Some(event) = self.1 {
+        let _ = CloseHandle(event);
+      }
     }
   }
 }
@@ -234,7 +237,11 @@ pub fn acquire_lock(mutex_name: &str, event_name: &str) -> Result<MultiLock> {
       return Err(anyhow!("another process already holds {mutex_name}"));
     }
     match CreateEventW(None, true, false, PCWSTR(e.as_ptr())) {
-      Ok(event) => Ok(MultiLock(mutex, event)),
+      Ok(event) => Ok(MultiLock(mutex, Some(event))),
+      // Another multi-instance tool (ExoPanda does this) holds the event's name as a different kind
+      // of object. Roblox can't create its singleton event then either, so extra windows already
+      // work: keep our mutex and carry on instead of refusing to launch.
+      Err(err) if err.code() == ERROR_INVALID_HANDLE.to_hresult() => Ok(MultiLock(mutex, None)),
       Err(err) => {
         let _ = CloseHandle(mutex);
         Err(err.into())
@@ -248,6 +255,24 @@ mod tests {
   use super::*;
 
   fn p(pid: u32, parent: u32) -> ProcInfo { ProcInfo { pid, parent, created: 0 } }
+
+  // Names unique to this test run, so tests never touch Roblox's real lock.
+  fn names(tag: &str) -> (String, String) {
+    let id = std::process::id();
+    (format!("DockieTest_{tag}_mutex_{id}"), format!("DockieTest_{tag}_event_{id}"))
+  }
+
+  #[test]
+  fn lock_works_beside_another_multi_instance_tool() {
+    // ExoPanda keeps a *mutex* under the event's name; Roblox can't make its singleton event then,
+    // so multi-instance already works and Dockie should carry on rather than fail.
+    let (m, e) = names("exopanda");
+    let w = wide(&e);
+    let squatter = unsafe { CreateMutexW(None, false, PCWSTR(w.as_ptr())) }.expect("stand-in mutex");
+    let lock = acquire_lock(&m, &e);
+    unsafe { let _ = CloseHandle(squatter); }
+    assert!(lock.is_ok(), "{:?}", lock.err());
+  }
 
   #[test]
   fn uptime_counts_whole_seconds() {
