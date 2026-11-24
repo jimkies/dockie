@@ -105,6 +105,14 @@ pub fn set_settings(app: AppHandle, settings: Settings) -> Res<()> {
   ctx.attach.listen(port)
 }
 
+/// Settings' Browse buttons: the executor's exe, or its autoexec folder. None when cancelled.
+#[tauri::command]
+pub async fn pick_path(app: AppHandle, folder: bool) -> Option<String> {
+  let d = app.dialog().file();
+  let p = if folder { d.set_title("Executor's autoexec folder").blocking_pick_folder() } else { d.set_title("Executor app").add_filter("App", &["exe"]).blocking_pick_file() };
+  p?.into_path().ok().map(|p| p.display().to_string())
+}
+
 #[tauri::command]
 pub async fn check_accounts(app: AppHandle) {
   check_all(app).await

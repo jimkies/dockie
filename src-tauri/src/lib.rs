@@ -92,6 +92,7 @@ pub fn run() {
       commands::set_fps_cap,
       commands::set_hide_alt_tab,
       commands::set_settings,
+      commands::pick_path,
       commands::check_accounts,
       commands::export_accounts,
       commands::import_accounts,

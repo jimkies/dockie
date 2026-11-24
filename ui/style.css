@@ -280,6 +280,24 @@ button.link:active { scale: .97; }
 }
 .switch:checked { background: var(--accent); border-color: transparent; }
 .switch:checked::after { translate: 16px 0; background: var(--accent-ink); }
+.switch:active:not(:disabled)::after { scale: .88; } /* the knob gives under the press, like a button */
+.switch:disabled { opacity: .45; cursor: default; }
+#set-port { width: 112px; }
+.grow-min { min-width: 0; }
+/* a chosen file or folder: monospace like a path in Explorer's address bar, wraps instead of hiding its end */
+.help.path { font-family: var(--mono); font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+.help.path.unset { font-family: inherit; color: var(--faint); }
+.help code { font-family: var(--mono); font-size: 11px; padding: 1px 4px; border-radius: 4px; background: var(--raised); }
+/* a switch inside a sheet: same row shape as Settings, without the card */
+.toggle-row { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; padding-top: 12px; border-top: 1px solid var(--line); }
+.toggle-row label { font-size: 14px; font-weight: 500; }
+
+/* executor attach status, in a tile's meta line: same dot language as the run pill */
+.attach { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); --dot: var(--faint); }
+.attach::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--dot); transition: background-color 150ms var(--ease-out); }
+.attach.ok { --dot: var(--ok); }
+.attach.warn { --dot: var(--warn); }
+.attach.off { color: var(--faint); }
 
 /* ---- sheets & toasts ---- */
 dialog.sheet {

@@ -35,8 +35,17 @@ function fmtUptime(s) {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
 
+// Executor attach status for a tile's meta line (from the localhost server); null before the
+// script in that window ever said hello, so accounts without an executor show nothing extra.
+function attachView(s) {
+  if (s === "attached") return { text: "Attached", tone: "ok", title: "The executor's script is running in this window" };
+  if (s === "stale") return { text: "Stale", tone: "warn", title: "No heartbeat from the executor's script for over 30 s; the game may be frozen or loading" };
+  if (s === "disconnected") return { text: "Disconnected", tone: "off", title: "The executor's script lost its connection, usually because the window closed" };
+  return null;
+}
+
 // Which way a tab switch moves: 1 = to a tab on the right, -1 = left.
 const TABS = ["accounts", "windows", "settings"];
 const tabStep = (from, to) => Math.sign(TABS.indexOf(to) - TABS.indexOf(from));
 
-if (typeof module !== "undefined") module.exports = { tileState, warnText, searchPlan, fmtBytes, fmtUptime, tabStep };
+if (typeof module !== "undefined") module.exports = { tileState, warnText, searchPlan, fmtBytes, fmtUptime, tabStep, attachView };

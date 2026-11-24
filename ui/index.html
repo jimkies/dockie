@@ -117,6 +117,33 @@
         <p class="help">Moves the idle memory of minimized Dockie windows to disk. Expect a short stutter when you reopen one.</p></div>
       <input id="set-trim" class="switch" type="checkbox" role="switch">
     </div>
+    <h2 class="group">Executor</h2>
+    <div class="set-row">
+      <div class="grow-min"><span class="label" id="exe-label">Executor app</span>
+        <p id="exe-path" class="help path">Not set</p></div>
+      <button id="exe-browse" class="btn" aria-describedby="exe-label">Choose…</button>
+    </div>
+    <div class="set-row">
+      <div><label for="set-exe-start">Start executor with Dockie</label>
+        <p id="exe-start-help" class="help">Opens it minimized before Dockie launches an account, without an admin prompt. Skipped when it's already open.</p></div>
+      <input id="set-exe-start" class="switch" type="checkbox" role="switch" aria-describedby="exe-start-help">
+    </div>
+    <div class="set-row">
+      <div><label for="set-exe-hide">Keep executor in the tray</label>
+        <p id="exe-hide-help" class="help">Off the taskbar and out of Alt+Tab. Click its tray icon to show or hide it; minimizing sends it back.</p></div>
+      <input id="set-exe-hide" class="switch" type="checkbox" role="switch" aria-describedby="exe-hide-help">
+    </div>
+    <div class="set-row">
+      <div class="grow-min"><span class="label" id="ax-label">Autoexec folder</span>
+        <p id="ax-path" class="help path">Not set</p>
+        <p class="help">Dockie keeps <code>dockie_antiafk.lua</code> here (anti-AFK and attach status) and never touches your other scripts.</p></div>
+      <button id="ax-browse" class="btn" aria-describedby="ax-label">Choose…</button>
+    </div>
+    <div class="set-row">
+      <div><label for="set-port">Attach status port</label>
+        <p id="port-help" class="help">The script reports here so each account can show Attached. Only this PC can connect.</p></div>
+      <input id="set-port" class="field num" type="number" min="1024" max="65535" aria-describedby="port-help">
+    </div>
     <h2 class="group">Data</h2>
     <div class="set-row">
       <div><span class="label">Accounts and settings</span>
@@ -164,6 +191,11 @@
       <label class="stack">Note
         <input id="edit-note" class="field" type="text" placeholder="e.g. Jake's alt">
       </label>
+    </div>
+    <div class="toggle-row">
+      <div><label for="edit-alttab">Hide from Alt+Tab</label>
+        <p id="edit-alttab-help" class="help">Keeps its taskbar button. An open window changes as soon as you save.</p></div>
+      <input id="edit-alttab" class="switch" type="checkbox" role="switch" aria-describedby="edit-alttab-help">
     </div>
     <div class="actions">
       <button id="edit-cancel" class="btn" type="button">Cancel</button>
