@@ -36,10 +36,14 @@ Per-account: `hide_alt_tab: bool` (default false).
 
 ## 1. Executor launch (`executor.rs`)
 
-`ensure_running()` runs in the launcher loop before each job when `executor_autostart` is on and the
-path is set. If a process with the exe's file name is already running, nothing happens. Otherwise it
-starts it with `CreateProcessW` and `STARTF_USESHOWWINDOW | SW_SHOWMINNOACTIVE`, then polls the process
-list every 250 ms for up to 10 s. A missing or wrong path, or a timeout, is logged and shown as a
+`ensure_running()` runs when Dockie starts and in the launcher loop before each job, when
+`executor_autostart` is on and the path is set. If a process with the exe's file name is already
+running, nothing happens. Otherwise it starts it with `CreateProcessW`, `STARTF_USESHOWWINDOW |
+SW_SHOWMINNOACTIVE`, and the environment variable `__COMPAT_LAYER=RunAsInvoker` (grill decision: Potassium's
+manifest asks for admin; RunAsInvoker runs it as a normal app, so no UAC prompt and Dockie may change
+its windows; nothing in Potassium's files changes). Then it polls the process list every 250 ms for up
+to 10 s. If an executor that is already running turns out to be elevated (style writes fail with
+access denied), Dockie leaves it alone, logs it once and shows a notice: close it and let Dockie start it. A missing or wrong path, or a timeout, is logged and shown as a
 toast; launching Roblox continues anyway (the executor is optional to the launch).
 
 ## 2. Autoexec script
@@ -56,7 +60,8 @@ reconnect 15 s after any failure. Everything in `pcall`.
 ## 3. WebSocket server (`attach.rs`)
 
 `tungstenite` (sync) on a plain thread: `TcpListener` bound to `127.0.0.1:<ws_port>`, one thread per
-client. Handshake rejects any request with an `Origin` header (browsers always send one, executors
+client. Default port 47613, no path checked (Dockie Remote's phone server will use 47821 and `/v1`;
+the two stay separate servers on separate ports). Handshake rejects any request with an `Origin` header (browsers always send one, executors
 don't), so a web page can't fake statuses. Max 32 clients, 4 KB max message. Malformed JSON is ignored.
 Each connection gets an id; `userId -> (conn_id, last_seen, closed)`. A close only marks
 Disconnected if it is still the newest connection for that user (rejoins open a new one first).
@@ -77,9 +82,11 @@ window: save the original `GWL_EXSTYLE`, set `WS_EX_TOOLWINDOW`, clear `WS_EX_AP
 it again.
 
 Minimize to tray: a "hooks" thread with a message loop owns `SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART,
-…, executor_pid, 0, WINEVENT_OUTOFCONTEXT)`. On minimize it `SW_HIDE`s the window and shows a Tauri tray
-icon (Dockie's icon, tooltip with the exe name). Left-click: `SW_RESTORE` + `SetForegroundWindow`
-for every window hidden this way. Menu: Show / Hide / Exit executor. Exit closes the executor's
+…, executor_pid, 0, WINEVENT_OUTOFCONTEXT)`. On minimize it `SW_HIDE`s the window. Grill decision: the
+tray icon (Dockie's icon, tooltip with the exe name) shows the whole time the executor is running and
+managed, since with no taskbar button and no Alt+Tab it is the only way back to the executor.
+Left-click toggles: hidden or not in front, it is shown (`SW_RESTORE` + `SetForegroundWindow`); in
+front, it is hidden. Menu: Show / Hide / Exit executor. Exit closes the executor's
 windows with `WM_CLOSE` (graceful, not a kill). The hook is re-installed when the executor PID changes.
 
 If the executor runs as administrator, Windows blocks style changes from non-admin Dockie (UIPI):
@@ -131,4 +138,5 @@ Taskbar side of (a) with `AddTab`: (filled in after the Rust build)
 
 ## Still open
 
-(none yet)
+Nothing blocking. Not verifiable without running things on Jimmy's PC (he tests): whether Potassium
+works fully under RunAsInvoker, and the taskbar side of approach (a).
