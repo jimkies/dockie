@@ -80,6 +80,7 @@ impl AppCtx {
         note: a.note.clone(),
         join: a.join.clone(),
         fps_cap: a.fps_cap,
+        hide_alt_tab: a.hide_alt_tab,
         status: a.status,
         running: state.launched.iter().any(|l| l.user_id == a.user_id && is_alive(l, &procs)),
       })
@@ -106,6 +107,7 @@ pub struct AccountView {
   pub note: String,
   pub join: String,
   pub fps_cap: Option<i32>,
+  pub hide_alt_tab: bool,
   pub status: AccountStatus,
   pub running: bool,
 }
@@ -158,6 +160,7 @@ pub async fn add_account(app: &AppHandle, cookie: &str, refresh: Option<u64>) ->
     fps_cap: None,
     cookie_dpapi: dpapi::protect(&cookie).map_err(|e| e.to_string())?,
     status: AccountStatus::Ok,
+    hide_alt_tab: false,
   };
   let replaced = {
     let mut list = ctx.accounts.lock().unwrap();
@@ -218,7 +221,7 @@ mod tests {
   use super::*;
 
   fn acc() -> Account {
-    Account { user_id: 1, username: "old".into(), display_name: "Old".into(), avatar_url: None, added_at: 0, note: String::new(), join: String::new(), fps_cap: None, cookie_dpapi: String::new(), status: AccountStatus::Unchecked }
+    Account { user_id: 1, username: "old".into(), display_name: "Old".into(), avatar_url: None, added_at: 0, note: String::new(), join: String::new(), fps_cap: None, cookie_dpapi: String::new(), status: AccountStatus::Unchecked, hide_alt_tab: false }
   }
 
   #[test]

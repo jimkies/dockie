@@ -82,6 +82,12 @@ pub fn set_fps_cap(app: AppHandle, user_id: u64, cap: Option<i32>) -> Res<()> {
 }
 
 #[tauri::command]
+pub fn set_hide_alt_tab(app: AppHandle, user_id: u64, on: bool) -> Res<()> {
+  // the ticker applies it to a running window within a second
+  edit(&app, user_id, |a| a.hide_alt_tab = on)
+}
+
+#[tauri::command]
 pub fn set_settings(ctx: State<AppCtx>, settings: Settings) -> Res<()> {
   check_cap(settings.fps_cap_default)?;
   // saved under the lock so the ticker's own settings write can't interleave

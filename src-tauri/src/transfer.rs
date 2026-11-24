@@ -60,10 +60,12 @@ pub fn import_into(accounts: &mut Vec<Account>, items: Vec<ExportAccount>, now: 
       fps_cap: it.fps_cap.filter(|&c| c >= 1), // a bad cap in the file means "use the default"
       cookie_dpapi: protect(&it.cookie)?,
       status: AccountStatus::Unchecked,
+      hide_alt_tab: false,
     };
     match accounts.iter_mut().find(|a| a.user_id == acc.user_id) {
       Some(old) => {
         acc.added_at = old.added_at;
+        acc.hide_alt_tab = old.hide_alt_tab; // a window preference of this PC, not in export files
         *old = acc;
         replaced += 1;
       }
@@ -92,6 +94,7 @@ mod tests {
       fps_cap: Some(30),
       cookie_dpapi: format!("enc{id}"),
       status: AccountStatus::Ok,
+      hide_alt_tab: false,
     }
   }
   fn three() -> Vec<Account> {

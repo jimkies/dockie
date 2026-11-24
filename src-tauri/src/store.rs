@@ -22,6 +22,9 @@ pub struct Account {
   pub fps_cap: Option<i32>,
   pub cookie_dpapi: String,
   pub status: AccountStatus,
+  // keeps this account's Roblox window out of Alt+Tab (still on the taskbar)
+  #[serde(default)]
+  pub hide_alt_tab: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -30,10 +33,43 @@ pub struct AccountsFile {
   pub accounts: Vec<Account>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
 pub struct Settings {
   pub fps_cap_default: Option<i32>,
   pub trim_minimized: bool,
+  pub executor_path: String,
+  pub executor_autostart: bool,
+  pub autoexec_dir: String,
+  pub ws_port: u16,
+  pub manage_executor_windows: bool,
+}
+
+// Dockie Remote's phone server takes 47821; this one stays apart from it.
+pub const DEFAULT_WS_PORT: u16 = 47613;
+
+impl Default for Settings {
+  fn default() -> Settings {
+    Settings {
+      fps_cap_default: None,
+      trim_minimized: false,
+      executor_path: String::new(),
+      executor_autostart: false,
+      autoexec_dir: String::new(),
+      ws_port: DEFAULT_WS_PORT,
+      manage_executor_windows: true,
+    }
+  }
+}
+
+/// A window whose extended style Dockie changed, so it can be put back exactly.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Styled {
+  pub hwnd: isize,
+  pub pid: u32,
+  pub original: isize,
+  pub user_id: Option<u64>, // None = an executor window
+  pub tray_hidden: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -48,6 +84,8 @@ pub struct State {
   pub user_fps_cap: Option<i32>,
   pub restore_pending: bool,
   pub launched: Vec<LaunchedProc>,
+  #[serde(default)]
+  pub styled: Vec<Styled>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -79,7 +117,7 @@ pub fn upsert(accounts: &mut Vec<Account>, new: Account) -> Upsert {
   match accounts.iter_mut().find(|a| a.user_id == new.user_id) {
     Some(old) => {
       // keep what the user set; take the fresh session data
-      *old = Account { added_at: old.added_at, note: old.note.clone(), join: old.join.clone(), fps_cap: old.fps_cap, ..new };
+      *old = Account { added_at: old.added_at, note: old.note.clone(), join: old.join.clone(), fps_cap: old.fps_cap, hide_alt_tab: old.hide_alt_tab, ..new };
       Upsert::Replaced
     }
     None => {
@@ -156,6 +194,7 @@ mod tests {
       fps_cap: Some(30),
       cookie_dpapi: "old".into(),
       status: AccountStatus::NeedsSignIn,
+      hide_alt_tab: true,
     }
   }
 
@@ -201,10 +240,19 @@ mod tests {
   #[test]
   fn upsert_replaces_session_keeps_user_fields() {
     let mut v = vec![acct(1)];
-    let new = Account { cookie_dpapi: "new".into(), username: "B".into(), note: "".into(), join: "".into(), fps_cap: None, added_at: 99, ..acct(1) };
+    let new = Account { cookie_dpapi: "new".into(), username: "B".into(), note: "".into(), join: "".into(), fps_cap: None, added_at: 99, hide_alt_tab: false, ..acct(1) };
     assert_eq!(upsert(&mut v, new), Upsert::Replaced);
     assert_eq!(v.len(), 1);
     assert_eq!((v[0].cookie_dpapi.as_str(), v[0].username.as_str()), ("new", "B"));
     assert_eq!((v[0].note.as_str(), v[0].join.as_str(), v[0].fps_cap, v[0].added_at), ("n", "j", Some(30), 5));
+    assert!(v[0].hide_alt_tab);
+  }
+
+  #[test]
+  fn old_files_load_with_new_defaults() {
+    let s: Settings = serde_json::from_str(r#"{"fps_cap_default":30,"trim_minimized":true}"#).unwrap();
+    assert_eq!((s.fps_cap_default, s.trim_minimized, s.ws_port, s.manage_executor_windows), (Some(30), true, DEFAULT_WS_PORT, true));
+    let st: State = serde_json::from_str(r#"{"user_fps_cap":null,"restore_pending":false,"launched":[]}"#).unwrap();
+    assert!(st.styled.is_empty());
   }
 }

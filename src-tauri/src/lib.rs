@@ -4,6 +4,7 @@ pub mod dpapi;
 pub mod fps;
 pub mod join;
 pub mod launcher;
+pub mod logfile;
 pub mod login;
 pub mod preview;
 pub mod procs;
@@ -30,7 +31,10 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
       let local = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?;
-      let ctx = app::AppCtx::new(std::path::PathBuf::from(local).join("Dockie"));
+      let dir = std::path::PathBuf::from(local).join("Dockie");
+      logfile::init(&dir);
+      logfile::log("Dockie started");
+      let ctx = app::AppCtx::new(dir);
       *ctx.lock.lock().unwrap() = procs::take_lock(procs::LOCK_NAMES.0, procs::LOCK_NAMES.1).ok();
       ticker::reconcile(&ctx);
       app.manage(ctx);
@@ -57,6 +61,7 @@ pub fn run() {
       commands::set_note,
       commands::set_join,
       commands::set_fps_cap,
+      commands::set_hide_alt_tab,
       commands::set_settings,
       commands::check_accounts,
       commands::export_accounts,
