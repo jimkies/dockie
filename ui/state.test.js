@@ -15,12 +15,9 @@ assert.deepEqual(
 assert.deepEqual(tileState({ status: "ok" }, { state: "error", message: "x" }, true), { pill: "Running", tone: "ok", action: "stop", error: null });
 
 assert.equal(warnText({ lock_ok: true, roblox_running: true, accounts: [] }), null);
-assert.equal(
-  warnText({ lock_ok: false, roblox_running: true, accounts: [{ running: true }] }),
-  "Dockie was reopened while its Roblox windows were still open, so it can't open more until they close.",
-);
-assert.equal(warnText({ lock_ok: false, roblox_running: true, accounts: [{ running: false }] }), "Roblox is already running — extra windows can't open.");
-assert.equal(warnText({ lock_ok: false, roblox_running: false, accounts: [] }), null);
+const adminText = "A program running as administrator is holding Roblox's multi-instance lock, so extra windows can't open. Close that program, then try again.";
+assert.equal(warnText({ lock_ok: false, roblox_running: true, accounts: [{ running: true }] }), adminText);
+assert.equal(warnText({ lock_ok: false, roblox_running: false, accounts: [] }), adminText);
 console.log("state ok");
 
 // searchPlan: when a Join box should search Roblox games, and whether to offer "Follow @word"

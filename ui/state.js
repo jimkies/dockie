@@ -9,11 +9,11 @@ function tileState(acc, launch, running) {
   return { pill: "Ready", tone: "idle", action: "launch", error: null };
 }
 
+// Dockie takes the lock over from Roblox and ordinary programs, so this only shows when a program
+// running as administrator holds it.
 function warnText(snap) {
-  if (snap.lock_ok || !snap.roblox_running) return null;
-  return snap.accounts.some((a) => a.running)
-    ? "Dockie was reopened while its Roblox windows were still open, so it can't open more until they close."
-    : "Roblox is already running — extra windows can't open.";
+  if (snap.lock_ok) return null;
+  return "A program running as administrator is holding Roblox's multi-instance lock, so extra windows can't open. Close that program, then try again.";
 }
 
 // Words in a Join box search Roblox games; links, place IDs, servers and @user don't.

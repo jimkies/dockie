@@ -1,13 +1,20 @@
 use anyhow::{anyhow, bail, Result};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use windows::core::{BOOL, PCWSTR};
-use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_INVALID_HANDLE, FILETIME, HANDLE, HWND, LPARAM};
+use windows::Wdk::Foundation::{NtQueryObject, OBJECT_INFORMATION_CLASS};
+use windows::Wdk::System::SystemInformation::{NtQuerySystemInformation, SYSTEM_INFORMATION_CLASS};
+use windows::Win32::Foundation::{
+  CloseHandle, DuplicateHandle, GetLastError, DUPLICATE_CLOSE_SOURCE, DUPLICATE_SAME_ACCESS, ERROR_ALREADY_EXISTS, ERROR_INVALID_HANDLE, FILETIME,
+  HANDLE, HWND, LPARAM, STATUS_INFO_LENGTH_MISMATCH, UNICODE_STRING,
+};
 use windows::Win32::System::Diagnostics::ToolHelp::{
   CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::ProcessStatus::{K32EmptyWorkingSet, K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows::Win32::System::Registry::{RegGetValueW, HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
 use windows::Win32::System::Threading::{
+  GetCurrentProcess, GetCurrentProcessId, PROCESS_DUP_HANDLE,
   CreateEventW, CreateMutexW, GetProcessTimes, OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION,
   PROCESS_SET_QUOTA, PROCESS_TERMINATE,
 };
@@ -247,6 +254,110 @@ pub fn acquire_lock(mutex_name: &str, event_name: &str) -> Result<MultiLock> {
         Err(err.into())
       }
     }
+  }
+}
+
+/// Takes Roblox's multi-instance lock. If another program holds it (Roblox opened before Dockie,
+/// or another multi-instance tool), its handles are closed first so Dockie can take it over.
+pub fn take_lock(mutex_name: &str, event_name: &str) -> Result<MultiLock> {
+  acquire_lock(mutex_name, event_name).or_else(|_| {
+    close_foreign_handles(&[mutex_name, event_name]);
+    acquire_lock(mutex_name, event_name)
+  })
+}
+
+/// One row of NtQuerySystemInformation(SystemExtendedHandleInformation).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct HandleEntry {
+  object: usize,
+  pid: usize,
+  handle: usize,
+  access: u32,
+  creator: u16,
+  kind: u16,
+  attributes: u32,
+  reserved: u32,
+}
+
+/// Every open handle on the system.
+fn system_handles() -> Vec<HandleEntry> {
+  let mut len: usize = 4 << 20;
+  loop {
+    let mut buf = vec![0usize; len / 8]; // usize-aligned for the entries
+    let mut ret = 0u32;
+    // SAFETY: buf is writable for its full byte length; the call writes at most that much.
+    let st = unsafe { NtQuerySystemInformation(SYSTEM_INFORMATION_CLASS(64), buf.as_mut_ptr().cast(), (buf.len() * 8) as u32, &mut ret) };
+    if st == STATUS_INFO_LENGTH_MISMATCH {
+      len = (ret as usize).max(len * 2) + (1 << 16); // the table grows while we ask
+      continue;
+    }
+    if st.0 < 0 {
+      return Vec::new();
+    }
+    let room = (buf.len() * 8 - 16) / std::mem::size_of::<HandleEntry>();
+    let count = buf[0].min(room);
+    // SAFETY: entries follow the two-usize header and `count` fits inside buf.
+    return unsafe { std::slice::from_raw_parts(buf.as_ptr().add(2).cast::<HandleEntry>(), count) }.to_vec();
+  }
+}
+
+/// The kernel name of one of our handles, like `\Sessions\1\BaseNamedObjects\ROBLOX_singletonMutex`.
+fn object_name(h: HANDLE) -> Option<String> {
+  let mut buf = vec![0usize; 512]; // 4 KB, aligned for UNICODE_STRING
+  let mut ret = 0u32;
+  // SAFETY: buf is writable for its full byte length.
+  let st = unsafe { NtQueryObject(Some(h), OBJECT_INFORMATION_CLASS(1), Some(buf.as_mut_ptr().cast()), (buf.len() * 8) as u32, Some(&mut ret)) };
+  if st.0 < 0 {
+    return None;
+  }
+  // SAFETY: on success buf starts with a UNICODE_STRING whose buffer points inside buf.
+  let s = unsafe { &*buf.as_ptr().cast::<UNICODE_STRING>() };
+  if s.Buffer.is_null() {
+    return None;
+  }
+  Some(String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(s.Buffer.0, s.Length as usize / 2) }))
+}
+
+/// Closes, inside other processes, every handle to a mutex or event with one of these names.
+/// Programs Dockie may not open (running as administrator) are skipped. Only mutex and event
+/// handles are looked at: asking the name of some other kinds, like pipes, can hang.
+pub fn close_foreign_handles(names: &[&str]) -> usize {
+  let suffixes: Vec<String> = names.iter().map(|n| format!("\\{n}")).collect();
+  unsafe {
+    let me = GetCurrentProcessId() as usize;
+    // learn the type numbers of "mutex" and "event" from two throwaway objects of our own
+    let probes = [CreateMutexW(None, false, PCWSTR::null()), CreateEventW(None, true, false, PCWSTR::null())];
+    let all = system_handles();
+    let kinds: Vec<u16> = probes
+      .iter()
+      .flatten()
+      .filter_map(|p| all.iter().find(|e| e.pid == me && e.handle == p.0 as usize).map(|e| e.kind))
+      .collect();
+    for p in probes.iter().flatten() {
+      let _ = CloseHandle(*p);
+    }
+    let mut procs: HashMap<usize, Option<HANDLE>> = HashMap::new();
+    let mut closed = 0;
+    for e in all.iter().filter(|e| e.pid != me && kinds.contains(&e.kind)) {
+      let Some(ph) = *procs.entry(e.pid).or_insert_with(|| OpenProcess(PROCESS_DUP_HANDLE, false, e.pid as u32).ok()) else { continue };
+      let theirs = HANDLE(e.handle as *mut _);
+      let mut ours = HANDLE::default();
+      if DuplicateHandle(ph, theirs, GetCurrentProcess(), &mut ours, 0, false, DUPLICATE_SAME_ACCESS).is_err() {
+        continue;
+      }
+      let name = object_name(ours);
+      let _ = CloseHandle(ours);
+      if name.is_some_and(|n| suffixes.iter().any(|s| n.ends_with(s.as_str())))
+        && DuplicateHandle(ph, theirs, HANDLE::default(), std::ptr::null_mut(), 0, false, DUPLICATE_CLOSE_SOURCE).is_ok()
+      {
+        closed += 1;
+      }
+    }
+    for ph in procs.values().flatten() {
+      let _ = CloseHandle(*ph);
+    }
+    closed
   }
 }
 

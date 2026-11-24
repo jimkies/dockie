@@ -121,7 +121,7 @@ pub fn split_running(ids: &[u64], running: &HashSet<u64>) -> (Vec<u64>, Vec<u64>
 fn ensure_lock(ctx: &AppCtx) -> Result<(), String> {
   let mut lock = ctx.lock.lock().unwrap();
   if lock.is_none() {
-    *lock = Some(procs::acquire_lock(LOCK_NAMES.0, LOCK_NAMES.1).map_err(|_| "Another program is holding Roblox's multi-instance lock. Close Roblox and any other multi-instance tool, then try again.")?);
+    *lock = Some(procs::take_lock(LOCK_NAMES.0, LOCK_NAMES.1).map_err(|_| "A program running as administrator is holding Roblox's multi-instance lock, so Dockie can't take it over. Close that program, then try again.")?);
   }
   Ok(())
 }

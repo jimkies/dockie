@@ -31,7 +31,7 @@ pub fn run() {
     .setup(|app| {
       let local = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?;
       let ctx = app::AppCtx::new(std::path::PathBuf::from(local).join("Dockie"));
-      *ctx.lock.lock().unwrap() = procs::acquire_lock(procs::LOCK_NAMES.0, procs::LOCK_NAMES.1).ok();
+      *ctx.lock.lock().unwrap() = procs::take_lock(procs::LOCK_NAMES.0, procs::LOCK_NAMES.1).ok();
       ticker::reconcile(&ctx);
       app.manage(ctx);
       app.manage(launcher::Launcher::start(app.handle().clone()));
