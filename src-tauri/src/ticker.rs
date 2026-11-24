@@ -85,6 +85,10 @@ fn tick(app: &AppHandle, minimized_since: &mut HashMap<u32, u64>, last_trim: &mu
       }
     }
   }
+  let exe_pid = crate::winstyle::tick(app, &alive);
+  let exe_name = crate::executor::exe_name(&ctx.settings.lock().unwrap().executor_path).unwrap_or_default();
+  crate::exec_tray::sync(app, exe_pid, &exe_name);
+  let _ = app.emit("attach", ctx.attach.statuses());
   let user_ids: Vec<u64> = alive.iter().map(|l| l.user_id).collect();
   let _ = app.emit("running", serde_json::json!({ "user_ids": user_ids }));
 }

@@ -12,6 +12,7 @@ const previews = new Map(); // user_id -> { minimized, image }
 const running = new Set();
 const cells = new Map();    // user_id -> paint() for that tile
 const uptimes = new Map();  // user_id -> seconds its window has been open, from the window poll
+const attached = new Map(); // user_id -> "attached" | "stale" | "disconnected", from the executor's script
 
 function el(tag, props = {}, ...kids) {
   const e = document.createElement(tag);
@@ -52,6 +53,16 @@ function setLabel(btn, text) {
   old.animate(fade(1, 0), { duration: 150, easing: "ease-out" }).finished.then(() => old.remove(), () => old.remove());
 }
 const call = (cmd, args) => invoke(cmd, args).catch(fail);
+// A rejected field shakes, so the error is felt where it happened, not only read in a toast.
+function shake(field) {
+  if (reduceMotion()) return;
+  field.animate([{ translate: "0" }, { translate: "-8px" }, { translate: "8px" }, { translate: "-5px" }, { translate: "5px" }, { translate: "-2px" }, { translate: "0" }], { duration: 360, easing: "ease-out" });
+}
+// Ends an add on a win: say who was added, not just redraw the grid.
+function added(r) {
+  if (r.was_other_account) toast("Signed in as a different account — added it as a new one");
+  else toast(r.replaced ? `Signed in again as @${r.username}` : `Added @${r.username}`);
+}
 
 // ---- menus: a trigger with aria-haspopup opens the .menu next to it ----
 function closeMenus(except) {
@@ -247,7 +258,9 @@ function renderTile(a, i) {
       .catch((e) => { game.textContent = String(e); game.className = "bad"; });
   }
   const fps = el("span", { className: "num", textContent: a.fps_cap ? `FPS ${a.fps_cap}` : "FPS default" });
-  const meta = el("div", { className: "meta" }, game, el("span", { className: "sep", textContent: "·" }), fps);
+  const attSep = el("span", { className: "sep", textContent: "·" });
+  const att = el("span", { className: "attach" });
+  const meta = el("div", { className: "meta" }, game, el("span", { className: "sep", textContent: "·" }), fps, attSep, att);
   const err = el("div", { className: "err" });
 
   // Re-applies launch/preview/running state to this tile.
@@ -257,6 +270,13 @@ function renderTile(a, i) {
     pill.className = "pill " + s.tone;
     const up = isRunning ? uptimes.get(id) : undefined; // the live dot plus time running
     pill.replaceChildren(s.pill, ...(up != null ? [el("span", { className: "up num", textContent: fmtUptime(up) })] : []));
+    const av = attachView(attached.get(id));
+    att.hidden = attSep.hidden = !av;
+    if (av) {
+      att.className = "attach " + av.tone;
+      att.textContent = av.text;
+      att.title = av.title;
+    }
     err.textContent = s.error ?? "";
     err.hidden = !s.error;
     btn.dataset.act = s.action;
@@ -310,8 +330,7 @@ function updateToolbar() {
 
 async function signIn(refreshUserId) {
   try {
-    const r = await invoke("begin_login", { refreshUserId });
-    if (r.was_other_account) toast("Signed in as a different account — added it as a new one");
+    added(await invoke("begin_login", { refreshUserId }));
   } catch (e) {
     if (!String(e).includes("cancelled")) fail(e);
   }
@@ -457,6 +476,7 @@ function openEdit(a) {
   $("edit-join").value = a.join;
   $("edit-fps").value = a.fps_cap ?? "";
   $("edit-note").value = a.note;
+  $("edit-alttab").checked = a.hide_alt_tab;
   editCombo.sync();
   describeEditJoin();
   $("edit-dlg").showModal();
@@ -480,7 +500,7 @@ $("edit-save").addEventListener("click", async (e) => {
     } catch (err) {
       $("edit-join-label").textContent = searchPlan(join) && !searchPlan(join).follow ? PICK_HINT : String(err);
       $("edit-join-label").className = "help bad";
-      if (!reduceMotion()) $("edit-join").animate([{ translate: "0" }, { translate: "-8px" }, { translate: "8px" }, { translate: "-5px" }, { translate: "5px" }, { translate: "-2px" }, { translate: "0" }], { duration: 360, easing: "ease-out" });
+      shake($("edit-join"));
       $("edit-join").focus();
       return;
     }
@@ -488,22 +508,46 @@ $("edit-save").addEventListener("click", async (e) => {
   $("edit-dlg").close();
   if (fps !== (a.fps_cap ?? null)) await call("set_fps_cap", { userId: id, cap: fps });
   if (note !== a.note) await call("set_note", { userId: id, note });
+  const hide = $("edit-alttab").checked;
+  if (hide !== a.hide_alt_tab) await call("set_hide_alt_tab", { userId: id, on: hide });
   refresh().catch(fail);
 });
 
-// ---- paste a cookie ----
+// ---- paste a cookie: the sheet stays open while Roblox checks it, and a bad cookie shakes the box ----
 function openPaste() {
-  $("paste-dlg").returnValue = "";
   $("paste-text").value = "";
+  $("paste-err").hidden = true;
+  $("paste-ok").disabled = false;
+  setLabel($("paste-ok"), "Add account");
   $("paste-dlg").showModal();
 }
-$("paste-dlg").addEventListener("close", async () => {
+function pasteError(text) {
+  $("paste-err").textContent = text;
+  $("paste-err").hidden = false;
+  shake($("paste-text"));
+  $("paste-text").focus();
+}
+$("paste-text").addEventListener("input", () => ($("paste-err").hidden = true));
+$("paste-ok").addEventListener("click", async (e) => {
+  e.preventDefault(); // close only once the cookie is saved
   const cookie = $("paste-text").value.trim();
-  $("paste-text").value = "";
-  if ($("paste-dlg").returnValue !== "ok" || !cookie) return;
-  try { await invoke("add_cookie", { cookie }); } catch (e) { fail(e); }
-  refresh().catch(fail);
+  if (!cookie) return pasteError("Paste a cookie first.");
+  $("paste-ok").disabled = true;
+  setLabel($("paste-ok"), "Checking…");
+  try {
+    const r = await invoke("add_cookie", { cookie });
+    $("paste-dlg").close();
+    $("paste-text").value = "";
+    added(r);
+    refresh().catch(fail);
+  } catch (err) {
+    pasteError(String(err));
+  } finally {
+    $("paste-ok").disabled = false;
+    setLabel($("paste-ok"), "Add account");
+  }
 });
+$("paste-dlg").addEventListener("close", () => ($("paste-text").value = "")); // never keep a cookie around after Cancel or Esc
 
 // ---- windows: one card per process, updated in place so the 2 s poll never flickers or steals focus ----
 const winCards = new Map(); // pid -> { el, paint }
@@ -576,15 +620,58 @@ async function closeAll() {
 }
 
 // ---- settings ----
+function showPath(p, path) {
+  p.textContent = path || "Not set";
+  p.classList.toggle("unset", !path);
+}
 function renderSettings() {
-  $("set-fps").value = snap.settings.fps_cap_default ?? "";
-  $("set-trim").checked = snap.settings.trim_minimized;
+  const s = snap.settings;
+  $("set-fps").value = s.fps_cap_default ?? "";
+  $("set-trim").checked = s.trim_minimized;
+  showPath($("exe-path"), s.executor_path);
+  showPath($("ax-path"), s.autoexec_dir);
+  $("set-exe-start").checked = s.executor_autostart;
+  $("set-exe-start").disabled = !s.executor_path;
+  $("exe-start-help").textContent = s.executor_path
+    ? "Opens it minimized before Dockie launches an account, without an admin prompt. Skipped when it's already open."
+    : "Choose the executor app first.";
+  $("set-exe-hide").checked = s.manage_executor_windows;
+  $("set-port").value = s.ws_port;
   const n = snap.accounts.length;
   $("data-help").textContent = `${n} account${n === 1 ? "" : "s"} saved on this PC. Sign-ins are encrypted to your Windows account.`;
 }
-function saveSettings() {
+// Sends every setting (missing ones would reset to defaults). Resolves true when saved cleanly.
+async function saveSettings(changes = {}) {
   const v = $("set-fps").value;
-  call("set_settings", { settings: { fps_cap_default: v === "" ? null : Number(v), trim_minimized: $("set-trim").checked } });
+  const settings = {
+    ...snap.settings,
+    fps_cap_default: v === "" ? null : Number(v),
+    trim_minimized: $("set-trim").checked,
+    executor_autostart: $("set-exe-start").checked,
+    manage_executor_windows: $("set-exe-hide").checked,
+    ws_port: Number($("set-port").value) || snap.settings.ws_port,
+    ...changes,
+  };
+  try {
+    await invoke("set_settings", { settings });
+    snap.settings = settings;
+    return true;
+  } catch (e) {
+    toast(String(e));
+    if (/port/i.test(String(e))) shake($("set-port"));
+    await refresh().catch(fail); // a busy port is still saved; anything else wasn't
+    return false;
+  } finally {
+    renderSettings();
+  }
+}
+// Browse ends on a win: say what was set, not just redraw the path.
+async function choose(folder) {
+  const path = await call("pick_path", { folder });
+  if (!path) return;
+  if (await saveSettings(folder ? { autoexec_dir: path } : { executor_path: path })) {
+    toast(folder ? "dockie_antiafk.lua is in place" : `Executor set to ${path.split(/[\\/]/).pop()}`);
+  }
 }
 
 // ---- wiring ----
@@ -607,8 +694,12 @@ for (const id of ["import", "empty-import"]) $(id).addEventListener("click", asy
   refresh().catch(fail);
 });
 $("export").addEventListener("click", () => call("export_accounts", { userIds: [...selected] }));
-$("set-fps").addEventListener("blur", saveSettings);
-$("set-trim").addEventListener("change", saveSettings);
+$("set-fps").addEventListener("blur", () => saveSettings());
+$("set-trim").addEventListener("change", () => saveSettings());
+for (const id of ["set-exe-start", "set-exe-hide"]) $(id).addEventListener("change", () => saveSettings());
+$("set-port").addEventListener("blur", () => { if (Number($("set-port").value) !== snap.settings.ws_port) saveSettings(); });
+$("exe-browse").addEventListener("click", () => choose(false));
+$("ax-browse").addEventListener("click", () => choose(true));
 $("open-data").addEventListener("click", () => call("open_data_folder"));
 
 listen("accounts-changed", () => refresh().catch(fail));
@@ -626,6 +717,14 @@ listen("running", ({ payload: p }) => {
   updateToolbar();
 });
 listen("notice", ({ payload: p }) => toast(p.message));
+listen("attach", ({ payload: p }) => {
+  for (const [k, v] of Object.entries(p)) {
+    const id = Number(k);
+    if (attached.get(id) === v) continue;
+    attached.set(id, v);
+    cells.get(id)?.();
+  }
+});
 listen("confirm-quit", async () => {
   if (await ask("Roblox windows stay open, but no new extra windows can open until you reopen Dockie. Quit?")) invoke("quit");
 });

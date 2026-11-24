@@ -74,6 +74,8 @@ impl Launcher {
           emit(&app, job.user_id, "running", None);
           continue;
         }
+        // the executor attaches to Roblox on its own, so it has to be up first; a failure doesn't stop the launch
+        crate::executor::autostart(&app).await;
         // the ticker skips while launching, so put back a closed window's exit-write before each job
         crate::ticker::reconcile(&ctx);
         ctx.launching.store(true, Ordering::SeqCst);
@@ -121,7 +123,7 @@ pub fn split_running(ids: &[u64], running: &HashSet<u64>) -> (Vec<u64>, Vec<u64>
 fn ensure_lock(ctx: &AppCtx) -> Result<(), String> {
   let mut lock = ctx.lock.lock().unwrap();
   if lock.is_none() {
-    *lock = Some(procs::acquire_lock(LOCK_NAMES.0, LOCK_NAMES.1).map_err(|_| "Couldn't take the multi-instance lock")?);
+    *lock = Some(procs::take_lock(LOCK_NAMES.0, LOCK_NAMES.1).map_err(|_| "A program running as administrator is holding Roblox's multi-instance lock, so Dockie can't take it over. Close that program, then try again.")?);
   }
   Ok(())
 }

@@ -82,13 +82,35 @@ pub fn set_fps_cap(app: AppHandle, user_id: u64, cap: Option<i32>) -> Res<()> {
 }
 
 #[tauri::command]
-pub fn set_settings(ctx: State<AppCtx>, settings: Settings) -> Res<()> {
+pub fn set_hide_alt_tab(app: AppHandle, user_id: u64, on: bool) -> Res<()> {
+  // the ticker applies it to a running window within a second
+  edit(&app, user_id, |a| a.hide_alt_tab = on)
+}
+
+#[tauri::command]
+pub fn set_settings(app: AppHandle, settings: Settings) -> Res<()> {
   check_cap(settings.fps_cap_default)?;
-  // saved under the lock so the ticker's own settings write can't interleave
-  let mut s = ctx.settings.lock().unwrap();
-  ctx.store.save_settings(&settings).map_err(e)?;
-  *s = settings;
-  Ok(())
+  if settings.ws_port < 1024 {
+    return Err("Pick a port from 1024 to 65535".into());
+  }
+  let ctx = app.state::<AppCtx>();
+  {
+    // saved under the lock so the ticker's own settings write can't interleave
+    let mut s = ctx.settings.lock().unwrap();
+    ctx.store.save_settings(&settings).map_err(e)?;
+    *s = settings;
+  }
+  crate::executor::deploy_script(&app);
+  let port = ctx.settings.lock().unwrap().ws_port;
+  ctx.attach.listen(port)
+}
+
+/// Settings' Browse buttons: the executor's exe, or its autoexec folder. None when cancelled.
+#[tauri::command]
+pub async fn pick_path(app: AppHandle, folder: bool) -> Option<String> {
+  let d = app.dialog().file();
+  let p = if folder { d.set_title("Executor's autoexec folder").blocking_pick_folder() } else { d.set_title("Executor app").add_filter("App", &["exe"]).blocking_pick_file() };
+  p?.into_path().ok().map(|p| p.display().to_string())
 }
 
 #[tauri::command]
