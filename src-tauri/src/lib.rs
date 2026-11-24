@@ -1,6 +1,7 @@
 pub mod app;
 pub mod commands;
 pub mod dpapi;
+pub mod executor;
 pub mod fps;
 pub mod join;
 pub mod launcher;
@@ -40,6 +41,8 @@ pub fn run() {
       app.manage(ctx);
       app.manage(launcher::Launcher::start(app.handle().clone()));
       tauri::async_runtime::spawn(app::check_all(app.handle().clone()));
+      let h = app.handle().clone();
+      tauri::async_runtime::spawn(async move { executor::autostart(&h).await });
       ticker::start(app.handle().clone());
       Ok(())
     })

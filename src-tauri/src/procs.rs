@@ -105,6 +105,11 @@ fn created(pid: u32) -> u64 {
 }
 
 pub fn roblox_processes() -> Vec<ProcInfo> {
+  processes_named("RobloxPlayerBeta.exe")
+}
+
+/// Every running process with this exe file name (case-insensitive).
+pub fn processes_named(exe: &str) -> Vec<ProcInfo> {
   let mut out = Vec::new();
   unsafe {
     let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return out };
@@ -112,7 +117,7 @@ pub fn roblox_processes() -> Vec<ProcInfo> {
     let mut more = Process32FirstW(snap, &mut e).is_ok();
     while more {
       let n = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
-      if String::from_utf16_lossy(&e.szExeFile[..n]).eq_ignore_ascii_case("RobloxPlayerBeta.exe") {
+      if String::from_utf16_lossy(&e.szExeFile[..n]).eq_ignore_ascii_case(exe) {
         out.push(ProcInfo { pid: e.th32ProcessID, parent: e.th32ParentProcessID, created: created(e.th32ProcessID) });
       }
       more = Process32NextW(snap, &mut e).is_ok();

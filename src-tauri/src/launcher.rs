@@ -74,6 +74,8 @@ impl Launcher {
           emit(&app, job.user_id, "running", None);
           continue;
         }
+        // the executor attaches to Roblox on its own, so it has to be up first; a failure doesn't stop the launch
+        crate::executor::autostart(&app).await;
         // the ticker skips while launching, so put back a closed window's exit-write before each job
         crate::ticker::reconcile(&ctx);
         ctx.launching.store(true, Ordering::SeqCst);
