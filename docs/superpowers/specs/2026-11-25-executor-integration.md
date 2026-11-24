@@ -112,9 +112,22 @@ Dockie had no log. New `log.rs`: one line per event appended to `%LOCALAPPDATA%\
 truncated to empty when it passes 1 MB. Logged: executor start/skip/fail, script written/unchanged,
 WS listen/fail, hello/close per user, style applied/restored/blocked.
 
+## Facts found on Jimmy's PC
+
+- Executor: Potassium, `C:\Users\ytkjp\Desktop\games\OpXOyuApWKTlFzrV\Potassium.exe`, process name
+  `Potassium.exe`. Autoexec folder: `%LOCALAPPDATA%\Potassium\autoexec` (already holds Jimmy's own
+  `antiafk.luau`, left alone).
+- Potassium's manifest is `requireAdministrator`. A no-op `SetWindowLongPtrW(GWL_EXSTYLE)` from a normal
+  process on its windows fails with error 5 (UIPI). So section 4 needs Potassium to run un-elevated.
+
 ## Test results
 
-(filled in after testing)
+Test window (a WinForms window made by a scratch script), Alt+Tab captured with a screenshot:
+- no change: in Alt+Tab.
+- (a) `WS_EX_TOOLWINDOW`, `WS_EX_APPWINDOW` cleared: gone from Alt+Tab.
+- (b) `WS_EX_TOOLWINDOW | WS_EX_APPWINDOW`: still in Alt+Tab. (b) fails, as Raymond Chen's rules predict.
+
+Taskbar side of (a) with `AddTab`: (filled in after the Rust build)
 
 ## Still open
 
