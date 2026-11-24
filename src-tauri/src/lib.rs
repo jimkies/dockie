@@ -41,6 +41,7 @@ pub fn run() {
       app.manage(ctx);
       app.manage(launcher::Launcher::start(app.handle().clone()));
       tauri::async_runtime::spawn(app::check_all(app.handle().clone()));
+      executor::deploy_script(app.handle());
       let h = app.handle().clone();
       tauri::async_runtime::spawn(async move { executor::autostart(&h).await });
       ticker::start(app.handle().clone());

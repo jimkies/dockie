@@ -88,12 +88,19 @@ pub fn set_hide_alt_tab(app: AppHandle, user_id: u64, on: bool) -> Res<()> {
 }
 
 #[tauri::command]
-pub fn set_settings(ctx: State<AppCtx>, settings: Settings) -> Res<()> {
+pub fn set_settings(app: AppHandle, settings: Settings) -> Res<()> {
   check_cap(settings.fps_cap_default)?;
-  // saved under the lock so the ticker's own settings write can't interleave
-  let mut s = ctx.settings.lock().unwrap();
-  ctx.store.save_settings(&settings).map_err(e)?;
-  *s = settings;
+  if settings.ws_port < 1024 {
+    return Err("Pick a port from 1024 to 65535".into());
+  }
+  let ctx = app.state::<AppCtx>();
+  {
+    // saved under the lock so the ticker's own settings write can't interleave
+    let mut s = ctx.settings.lock().unwrap();
+    ctx.store.save_settings(&settings).map_err(e)?;
+    *s = settings;
+  }
+  crate::executor::deploy_script(&app);
   Ok(())
 }
 

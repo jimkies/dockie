@@ -44,6 +44,45 @@ pub async fn ensure_running(path: &str) -> Result<u32, String> {
   Err("The executor didn't start within 10 s".into())
 }
 
+pub const SCRIPT_NAME: &str = "dockie_antiafk.lua";
+
+/// The autoexec script with Dockie's WebSocket port filled in.
+pub fn script(port: u16) -> String {
+  include_str!("dockie_antiafk.lua").replace("__PORT__", &port.to_string())
+}
+
+/// Writes dockie_antiafk.lua into the autoexec folder when its content differs. Touches no other
+/// file there. Ok(true) when it wrote.
+pub fn write_script(dir: &str, port: u16) -> Result<bool, String> {
+  let dir = Path::new(dir.trim());
+  if dir.as_os_str().is_empty() {
+    return Ok(false);
+  }
+  if !dir.is_dir() {
+    return Err(format!("The autoexec folder {} doesn't exist. Check it in Settings.", dir.display()));
+  }
+  let path = dir.join(SCRIPT_NAME);
+  let want = script(port);
+  if std::fs::read_to_string(&path).is_ok_and(|have| have == want) {
+    return Ok(false);
+  }
+  std::fs::write(&path, want).map(|_| true).map_err(|e| format!("Couldn't write {}: {e}", path.display()))
+}
+
+/// Puts the current script in place, logging the outcome and telling the UI about a failure.
+pub fn deploy_script(app: &tauri::AppHandle) {
+  use tauri::{Emitter, Manager};
+  let s = app.state::<crate::app::AppCtx>().settings.lock().unwrap().clone();
+  match write_script(&s.autoexec_dir, s.ws_port) {
+    Ok(true) => log(format!("autoexec: wrote {SCRIPT_NAME} (port {})", s.ws_port)),
+    Ok(false) => {}
+    Err(m) => {
+      log(format!("autoexec: {m}"));
+      let _ = app.emit("notice", serde_json::json!({ "message": m }));
+    }
+  }
+}
+
 /// When "Start executor with Dockie" is on: starts it, and tells the UI if that failed.
 pub async fn autostart(app: &tauri::AppHandle) {
   use tauri::{Emitter, Manager};
@@ -113,6 +152,27 @@ mod tests {
     let vars = [("Path", "p"), ("__compat_layer", "old"), ("A", "1")].map(|(k, v)| (OsString::from(k), OsString::from(v)));
     let block = String::from_utf16(&env_block(vars.into_iter(), "__COMPAT_LAYER", "RunAsInvoker")).unwrap();
     assert_eq!(block, "A=1\0Path=p\0__COMPAT_LAYER=RunAsInvoker\0\0");
+  }
+
+  #[test]
+  fn script_is_written_only_when_changed_and_nothing_else_is_touched() {
+    let dir = std::env::temp_dir().join(format!("dockie_autoexec_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("antiafk.luau"), "mine").unwrap();
+    let d = dir.to_string_lossy().into_owned();
+    let first = write_script(&d, 47613);
+    let again = write_script(&d, 47613);
+    let new_port = write_script(&d, 50000);
+    let body = std::fs::read_to_string(dir.join(SCRIPT_NAME)).unwrap();
+    let other = std::fs::read_to_string(dir.join("antiafk.luau")).unwrap();
+    let count = std::fs::read_dir(&dir).unwrap().count();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!((first, again, new_port), (Ok(true), Ok(false), Ok(true)));
+    assert!(body.contains("ws://127.0.0.1:50000") && !body.contains("__PORT__"));
+    assert_eq!((other.as_str(), count), ("mine", 2));
+    assert_eq!(write_script("", 1), Ok(false)); // not set up yet
+    assert!(write_script(r"C:
+o\suchutoexec\dir", 1).is_err());
   }
 
   #[test]
